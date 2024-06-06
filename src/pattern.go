@@ -26,6 +26,7 @@ const (
 	termPrefix
 	termSuffix
 	termEqual
+	termMigemo
 )
 
 type term struct {
@@ -149,6 +150,7 @@ func BuildPattern(cache *ChunkCache, patternCache map[string]*Pattern, fuzzy boo
 	ptr.procFun[termExact] = algo.ExactMatchNaive
 	ptr.procFun[termPrefix] = algo.PrefixMatch
 	ptr.procFun[termSuffix] = algo.SuffixMatch
+	ptr.procFun[termMigemo] = algo.Migemo
 
 	patternCache[asString] = ptr
 	return ptr
@@ -191,6 +193,11 @@ func parseTerms(fuzzy bool, caseMode Case, normalize bool, str string) []termSet
 		if text != "$" && strings.HasSuffix(text, "$") {
 			typ = termSuffix
 			text = text[:len(text)-1]
+		}
+
+		if strings.HasPrefix(text, "/") {
+			typ = termMigemo
+			text = text[1:]
 		}
 
 		if strings.HasPrefix(text, "'") {
