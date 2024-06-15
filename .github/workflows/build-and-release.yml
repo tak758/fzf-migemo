@@ -1,0 +1,52 @@
+name: make build and Release
+
+on:
+  push:
+    tags:
+      - '*-migemo'
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version-file: go.mod
+
+    - name: Run GoReleaser
+      uses: goreleaser/goreleaser-action@v6
+      with:
+        # either 'goreleaser' (default) or 'goreleaser-pro'
+        distribution: goreleaser
+        # 'latest', 'nightly', or a semver
+        version: '~> v2'
+        args: build --clean --snapshot --skip=post-hooks
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Zip files
+      run: |
+        cd dist
+        mkdir tmp
+        for i in fzf*
+        do
+        zip -ryq tmp/"$i" "$i"
+        done
+        cd ..
+
+    - name: Upload binaries to release
+      uses: svenstaro/upload-release-action@v2
+      with:
+        repo_token: ${{ secrets.GITHUB_TOKEN }}
+        file: dist/tmp/*
+        tag: ${{ github.ref }}
+        overwrite: true
+        file_glob: true
+
