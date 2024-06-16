@@ -60,7 +60,7 @@ jobs:
         # repo: '<owner>/<repoName>' # you can input a another repo here, defaults to current repo
         release-drop: true
         # The number of releases except the latest release reserved, "-1" means delete all, default is 0.
-        release-keep-count: 0
+        release-keep-count: -1
         release-drop-tag: false
         pre-release-drop: true
         pre-release-keep-count: -1
