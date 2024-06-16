@@ -36,7 +36,7 @@ jobs:
         mkdir tmp
         for i in fzf*
         do
-        zip -ryq tmp/"$i" "$i"
+        zip -ry tmp/"$i" "$i"
         done
         cd ..
 
@@ -48,19 +48,18 @@ jobs:
         tag: ${{ github.ref }}
         overwrite: true
         file_glob: true
+        body: |-
+          以下の migemo 対応パッチをあてただけ
 
-    - name: Delete previous releases
-      uses: sgpublic/delete-release-action@v1.1
+          fzf 日本語拡張パッチ
+          https://github.com/takumayokoo/fzf-jp-extension
+
+    - name: Delete older releases
+      uses: jay2610/delete-older-releases@1.0.0
       with:
-        # repo: '<owner>/<repoName>' # you can input a another repo here, defaults to current repo
-        release-drop: true
-        # The number of releases except the latest release reserved, "-1" means delete all, default is 0.
-        release-keep-count: 0
-        release-drop-tag: false
-        pre-release-drop: true
-        pre-release-keep-count: -1
-        pre-release-drop-tag: false
-        draft-drop: true
-        draft-drop-count: -1
-        env:
-          GITHUB_TOKEN: ${{ secrets.TOKEN }}
+        keep_latest: 1
+        delete_tags: true
+        delete_type: 'release'
+        target_branch: 'master'
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
