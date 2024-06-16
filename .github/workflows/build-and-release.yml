@@ -48,6 +48,11 @@ jobs:
         tag: ${{ github.ref }}
         overwrite: true
         file_glob: true
+        body: |-
+          以下の migemo 対応パッチをあてただけ
+
+          fzf 日本語拡張パッチ
+          https://github.com/takumayokoo/fzf-jp-extension
 
     - name: Delete previous releases
       uses: sgpublic/delete-release-action@v1.1
@@ -62,5 +67,5 @@ jobs:
         pre-release-drop-tag: false
         draft-drop: true
         draft-drop-count: -1
-        env:
-          GITHUB_TOKEN: ${{ secrets.TOKEN }}
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
