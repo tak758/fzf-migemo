@@ -157,7 +157,6 @@ __fzf_generic_path_completion() {
       [ -z "$dir" ] && dir='.'
       [ "$dir" != "/" ] && dir="${dir/%\//}"
       matches=$(
-        # Declare and assign separately for older zsh versions.
         export FZF_DEFAULT_OPTS
         FZF_DEFAULT_OPTS=$(__fzf_defaults "--reverse --scheme=path" "${FZF_COMPLETION_OPTS-}")
         unset FZF_DEFAULT_COMMAND FZF_DEFAULT_OPTS_FILE
@@ -172,9 +171,9 @@ __fzf_generic_path_completion() {
             rest=${FZF_COMPLETION_PATH_OPTS-}
           fi
           __fzf_comprun "$cmd" ${(Q)${(Z+n+)fzf_opts}} -q "$leftover" --walker "$walker" --walker-root="$dir" ${(Q)${(Z+n+)rest}} < /dev/tty
-        fi | while read item; do
+        fi | while read -r item; do
           item="${item%$suffix}$suffix"
-          echo -n "${(q)item} "
+          echo -n -E "${(q)item} "
         done
       )
       matches=${matches% }
@@ -199,11 +198,11 @@ _fzf_dir_completion() {
     "" "/" ""
 }
 
-_fzf_feed_fifo() (
+_fzf_feed_fifo() {
   command rm -f "$1"
   mkfifo "$1"
-  cat <&0 > "$1" &
-)
+  cat <&0 > "$1" &|
+}
 
 _fzf_complete() {
   setopt localoptions ksh_arrays
@@ -299,7 +298,7 @@ _fzf_complete_unalias() {
 }
 
 _fzf_complete_kill() {
-  _fzf_complete -m --header-lines=1 --preview 'echo {}' --preview-window down:3:wrap --min-height 15 -- "$@" < <(
+  _fzf_complete -m --header-lines=1 --no-preview --wrap -- "$@" < <(
     command ps -eo user,pid,ppid,start,time,command 2> /dev/null ||
       command ps -eo user,pid,ppid,time,args # For BusyBox
   )
