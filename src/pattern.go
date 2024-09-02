@@ -23,6 +23,7 @@ type termType int
 const (
 	termFuzzy termType = iota
 	termExact
+	termExactBoundary
 	termPrefix
 	termSuffix
 	termEqual
@@ -148,6 +149,7 @@ func BuildPattern(cache *ChunkCache, patternCache map[string]*Pattern, fuzzy boo
 	ptr.procFun[termFuzzy] = fuzzyAlgo
 	ptr.procFun[termEqual] = algo.EqualMatch
 	ptr.procFun[termExact] = algo.ExactMatchNaive
+	ptr.procFun[termExactBoundary] = algo.ExactMatchBoundary
 	ptr.procFun[termPrefix] = algo.PrefixMatch
 	ptr.procFun[termSuffix] = algo.SuffixMatch
 	ptr.procFun[termMigemo] = algo.Migemo
@@ -195,12 +197,19 @@ func parseTerms(fuzzy bool, caseMode Case, normalize bool, str string) []termSet
 			text = text[:len(text)-1]
 		}
 
+<<<<<<< HEAD
 		if strings.HasPrefix(text, "/") {
 			typ = termMigemo
 			text = text[1:]
 		}
 
 		if strings.HasPrefix(text, "'") {
+=======
+		if len(text) > 2 && strings.HasPrefix(text, "'") && strings.HasSuffix(text, "'") {
+			typ = termExactBoundary
+			text = text[1 : len(text)-1]
+		} else if strings.HasPrefix(text, "'") {
+>>>>>>> upstream/master
 			// Flip exactness
 			if fuzzy && !inv {
 				typ = termExact
