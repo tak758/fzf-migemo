@@ -1,6 +1,24 @@
 CHANGELOG
 =========
 
+0.56.0
+------
+- Added `--gap[=N]` option to display empty lines between items.
+    - This can be useful to visually separate adjacent multi-line items.
+      ```sh
+      # All bash functions, highlighted
+      declare -f | perl -0777 -pe 's/^}\n/}\0/gm' |
+        bat --plain --language bash --color always |
+        fzf --read0 --ansi --reverse --multi --highlight-line --gap
+      ```
+    - Or just to make the list easier to read. For single-line items, you probably want to set `--color gutter:-1` as well to hide the gutter.
+      ```sh
+      fzf --info inline-right --gap --color gutter:-1
+      ```
+- Added `noinfo` option to `--preview-window` to hide the scroll indicator in the preview window
+- Bug fixes
+    - Thanks to @LangLangBart, @akinomyoga, and @charlievieth for fixing the bugs
+
 0.55.0
 ------
 _Release highlights: https://junegunn.github.io/fzf/releases/0.55.0/_

@@ -56,6 +56,7 @@ Usage: fzf [options]
     --wrap                  Enable line wrap
     --wrap-sign=STR         Indicator for wrapped lines
     --no-multi-line         Disable multi-line display of items when using --read0
+    --gap[=N]               Render empty lines between each item
     --keep-right            Keep the right end of the line visible on overflow
     --scroll-off=LINES      Number of screen lines to keep above or below when
                             scrolling to the top or to the bottom (default: 0)
@@ -120,8 +121,8 @@ Usage: fzf [options]
     --preview=COMMAND       Command to preview highlighted line ({})
     --preview-window=OPT    Preview window layout (default: right:50%)
                             [up|down|left|right][,SIZE[%]]
-                            [,[no]wrap][,[no]cycle][,[no]follow][,[no]hidden]
-                            [,border-BORDER_OPT]
+                            [,[no]wrap][,[no]cycle][,[no]follow][,[no]info]
+                            [,[no]hidden][,border-BORDER_OPT]
                             [,+SCROLL[OFFSETS][/DENOM]][,~HEADER_LINES]
                             [,default][,<SIZE_THRESHOLD(ALTERNATIVE_LAYOUT)]
     --preview-label=LABEL
@@ -271,6 +272,7 @@ type previewOpts struct {
 	wrap        bool
 	cycle       bool
 	follow      bool
+	info        bool
 	border      tui.BorderShape
 	headerLines int
 	threshold   int
@@ -386,7 +388,7 @@ func (a previewOpts) sameLayout(b previewOpts) bool {
 }
 
 func (a previewOpts) sameContentLayout(b previewOpts) bool {
-	return a.wrap == b.wrap && a.headerLines == b.headerLines
+	return a.wrap == b.wrap && a.headerLines == b.headerLines && a.info == b.info
 }
 
 func firstLine(s string) string {
@@ -472,6 +474,7 @@ type Options struct {
 	Header       []string
 	HeaderLines  int
 	HeaderFirst  bool
+	Gap          int
 	Ellipsis     *string
 	Scrollbar    *string
 	Margin       [4]sizeSpec
@@ -508,7 +511,7 @@ func filterNonEmpty(input []string) []string {
 }
 
 func defaultPreviewOpts(command string) previewOpts {
-	return previewOpts{command, posRight, sizeSpec{50, true}, "", false, false, false, false, tui.DefaultBorderShape, 0, 0, nil}
+	return previewOpts{command, posRight, sizeSpec{50, true}, "", false, false, false, false, true, tui.DefaultBorderShape, 0, 0, nil}
 }
 
 func defaultOptions() *Options {
@@ -578,6 +581,7 @@ func defaultOptions() *Options {
 		Header:       make([]string, 0),
 		HeaderLines:  0,
 		HeaderFirst:  false,
+		Gap:          0,
 		Ellipsis:     nil,
 		Scrollbar:    nil,
 		Margin:       defaultMargin(),
@@ -1789,6 +1793,10 @@ func parsePreviewWindowImpl(opts *previewOpts, input string) error {
 			opts.follow = true
 		case "nofollow":
 			opts.follow = false
+		case "info":
+			opts.info = true
+		case "noinfo":
+			opts.info = false
 		default:
 			if headerRegex.MatchString(token) {
 				if opts.headerLines, err = atoi(token[1:]); err != nil {
@@ -2338,6 +2346,12 @@ func parseOptions(index *int, opts *Options, allArgs []string) error {
 			opts.HeaderFirst = true
 		case "--no-header-first":
 			opts.HeaderFirst = false
+		case "--gap":
+			if opts.Gap, err = optionalNumeric(allArgs, &i, 1); err != nil {
+				return err
+			}
+		case "--no-gap":
+			opts.Gap = 0
 		case "--ellipsis":
 			str, err := nextString(allArgs, &i, "ellipsis string required")
 			if err != nil {
@@ -2623,6 +2637,10 @@ func parseOptions(index *int, opts *Options, allArgs []string) error {
 				opts.Header = strLines(value)
 			} else if match, value := optString(arg, "--header-lines="); match {
 				if opts.HeaderLines, err = atoi(value); err != nil {
+					return err
+				}
+			} else if match, value := optString(arg, "--gap="); match {
+				if opts.Gap, err = atoi(value); err != nil {
 					return err
 				}
 			} else if match, value := optString(arg, "--ellipsis="); match {

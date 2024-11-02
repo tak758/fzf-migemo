@@ -264,6 +264,7 @@ _fzf_handle_dynamic_completion() {
     # _completion_loader may not have updated completion for the command
     if [[ "$(complete -p "$orig_cmd" 2> /dev/null)" != "$orig_complete" ]]; then
       __fzf_orig_completion < <(complete -p "$orig_cmd" 2> /dev/null)
+      __fzf_orig_completion_get_orig_func "$cmd" || ret=1
 
       # Update orig_complete by _fzf_orig_completion entry
       [[ $orig_complete =~ ' -F '(_fzf_[^ ]+)' ' ]] &&
@@ -376,7 +377,7 @@ _fzf_complete() {
     selected=$(
       FZF_DEFAULT_OPTS=$(__fzf_defaults "--reverse" "${FZF_COMPLETION_OPTS-} $str_arg") \
       FZF_DEFAULT_OPTS_FILE='' \
-        __fzf_comprun "${rest[0]}" "${args[@]}" -q "$cur" | $post | command tr '\n' ' ')
+        __fzf_comprun "${rest[0]}" "${args[@]}" -q "$cur" | eval "$post" | command tr '\n' ' ')
     selected=${selected% } # Strip trailing space not to repeat "-o nospace"
     if [[ -n "$selected" ]]; then
       COMPREPLY=("$selected")
