@@ -1,6 +1,23 @@
 CHANGELOG
 =========
 
+0.57.0
+------
+- You can now resize the preview window by dragging the border
+- Built-in walker improvements
+    - `--walker-root` can take multiple directory arguments. e.g. `--walker-root include src lib`
+    - `--walker-skip` can handle multi-component patterns. e.g. `--walker-skip target/build`
+- Removed long processing delay when displaying images in the preview window
+- `FZF_PREVIEW_*` environment variables are exported to all child processes (#4098)
+- Bug fixes in fish scripts
+
+0.56.3
+------
+- Bug fixes in zsh scripts
+    - fix(zsh): handle backtick trigger edge case (#4090)
+    - revert(zsh): remove 'fc -RI' call in the history widget (#4093)
+    - Thanks to @LangLangBart for the contributions
+
 0.56.2
 ------
 - Bug fixes
