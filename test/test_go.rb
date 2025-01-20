@@ -1442,9 +1442,13 @@ class TestGoFZF < TestBase
     writelines(['=' * 10_000 + '0123456789'])
     [0, 3, 6].each do |off|
       tmux.prepare
-      tmux.send_keys "#{FZF} --hscroll-off=#{off} -q 0 < #{tempname}", :Enter
+      tmux.send_keys "#{FZF} --hscroll-off=#{off} -q 0 --bind space:toggle-hscroll < #{tempname}", :Enter
       tmux.until { |lines| assert lines[-3]&.end_with?((0..off).to_a.join + '··') }
       tmux.send_keys '9'
+      tmux.until { |lines| assert lines[-3]&.end_with?('789') }
+      tmux.send_keys :Space
+      tmux.until { |lines| assert lines[-3]&.end_with?('=··') }
+      tmux.send_keys :Space
       tmux.until { |lines| assert lines[-3]&.end_with?('789') }
       tmux.send_keys :Enter
     end
@@ -2133,7 +2137,11 @@ class TestGoFZF < TestBase
   end
 
   def test_keep_right
-    tmux.send_keys "seq 10000 | #{FZF} --read0 --keep-right --no-multi-line", :Enter
+    tmux.send_keys "seq 10000 | #{FZF} --read0 --keep-right --no-multi-line --bind space:toggle-multi-line", :Enter
+    tmux.until { |lines| assert lines.any_include?('9999␊10000') }
+    tmux.send_keys :Space
+    tmux.until { |lines| assert lines.any_include?('> 1') }
+    tmux.send_keys :Space
     tmux.until { |lines| assert lines.any_include?('9999␊10000') }
   end
 
@@ -2638,7 +2646,7 @@ class TestGoFZF < TestBase
   end
 
   def test_change_preview_window
-    tmux.send_keys "seq 1000 | #{FZF} --preview 'echo [[{}]]' --preview-window border-none --bind '" \
+    tmux.send_keys "seq 1000 | #{FZF} --preview 'echo [[{}]]' --no-preview-border --bind '" \
       'a:change-preview(echo __{}__),' \
       'b:change-preview-window(down)+change-preview(echo =={}==)+change-preview-window(up),' \
       'c:change-preview(),d:change-preview-window(hidden),' \
@@ -3415,31 +3423,362 @@ class TestGoFZF < TestBase
       │ >
       │   100/100 ──────
       │ > 1
-      │
+      │   ┈┈┈┈┈┈┈┈┈┈┈┈┈┈
       │   2
-      │
+      │   ┈┈┈┈┈┈┈┈┈┈┈┈┈┈
       │   3
-      │
+      │   ┈┈┈┈┈┈┈┈┈┈┈┈┈┈
       │   4
     BLOCK
     tmux.until { assert_block(block, _1) }
   end
 
   def test_gap_2
-    tmux.send_keys %(seq 100 | #{FZF} --gap=2 --border --reverse), :Enter
+    tmux.send_keys %(seq 100 | #{FZF} --gap=2 --gap-line xyz --border --reverse), :Enter
     block = <<~BLOCK
       ╭─────────────────
       │ >
       │   100/100 ──────
       │ > 1
       │
-      │
+      │   xyzxyzxyzxyzxy
       │   2
       │
-      │
+      │   xyzxyzxyzxyzxy
       │   3
     BLOCK
     tmux.until { assert_block(block, _1) }
+  end
+
+  def test_list_border_and_label
+    tmux.send_keys %(seq 100 | #{FZF} --border rounded --list-border double --list-label list --list-label-pos 2:bottom --header-lines 3 --query 1 --padding 1,2), :Enter
+    block = <<~BLOCK
+      │   ║   11
+      │   ║ > 10
+      │   ║   3
+      │   ║   2
+      │   ║   1
+      │   ║   19/97 ─
+      │   ║ > 1
+      │   ╚list══════
+      │
+      ╰──────────────
+    BLOCK
+    tmux.until { assert_block(block, _1) }
+  end
+
+  def test_input_border_and_label
+    tmux.send_keys %(seq 100 | #{FZF} --border rounded --input-border bold --input-label input --input-label-pos 2 --header-lines 3 --query 1 --padding 1,2), :Enter
+    block = <<~BLOCK
+      │     11
+      │   > 10
+      │     3
+      │     2
+      │     1
+      │   ┏input━━━━━
+      │   ┃   19/97
+      │   ┃ > 1
+      │   ┗━━━━━━━━━━
+      │
+      ╰──────────────
+    BLOCK
+    tmux.until { assert_block(block, _1) }
+  end
+
+  def test_input_border_and_label_header_first
+    tmux.send_keys %(seq 100 | #{FZF} --border rounded --input-border bold --input-label input --input-label-pos 2 --header-lines 3 --query 1 --padding 1,2 --header-first), :Enter
+    block = <<~BLOCK
+      │     11
+      │   > 10
+      │   ┏input━━━━━
+      │   ┃   19/97
+      │   ┃ > 1
+      │   ┗━━━━━━━━━━
+      │     3
+      │     2
+      │     1
+      │
+      ╰──────────────
+    BLOCK
+    tmux.until { assert_block(block, _1) }
+  end
+
+  def test_list_input_border_and_label
+    tmux.send_keys %(
+      seq 100 | #{FZF} --border rounded --list-border double --input-border bold --list-label-pos 2:bottom --input-label-pos 2 --header-lines 3 --query 1 --padding 1,2 \
+      --bind 'start:transform-input-label(echo INPUT)+transform-list-label(echo LIST)' \
+      --bind 'space:change-input-label( input )+change-list-label( list )'
+    ).strip, :Enter
+    block = <<~BLOCK
+      │   ║   11
+      │   ║ > 10
+      │   ╚LIST══════
+      │       3
+      │       2
+      │       1
+      │   ┏INPUT━━━━━
+      │   ┃   19/97
+      │   ┃ > 1
+      │   ┗━━━━━━━━━━
+      │
+      ╰──────────────
+    BLOCK
+    tmux.until { assert_block(block, _1) }
+    tmux.send_keys :Space
+    block = <<~BLOCK
+      │   ║   11
+      │   ║ > 10
+      │   ╚ list ════
+      │       3
+      │       2
+      │       1
+      │   ┏ input ━━━
+      │   ┃   19/97
+      │   ┃ > 1
+      │   ┗━━━━━━━━━━
+      │
+      ╰──────────────
+    BLOCK
+    tmux.until { assert_block(block, _1) }
+  end
+
+  def test_list_input_border_and_label_header_first
+    tmux.send_keys %(
+      seq 100 | #{FZF} --border rounded --list-border double --input-border bold --list-label-pos 2:bottom --input-label-pos 2 --header-lines 3 --query 1 --padding 1,2 \
+      --bind 'start:transform-input-label(echo INPUT)+transform-list-label(echo LIST)' \
+      --bind 'space:change-input-label( input )+change-list-label( list )' --header-first
+    ).strip, :Enter
+    block = <<~BLOCK
+      │   ║   11
+      │   ║ > 10
+      │   ╚LIST══════
+      │   ┏INPUT━━━━━
+      │   ┃   19/97
+      │   ┃ > 1
+      │   ┗━━━━━━━━━━
+      │       3
+      │       2
+      │       1
+      │
+      ╰──────────────
+    BLOCK
+    tmux.until { assert_block(block, _1) }
+    tmux.send_keys :Space
+    block = <<~BLOCK
+      │   ║   11
+      │   ║ > 10
+      │   ╚ list ════
+      │   ┏ input ━━━
+      │   ┃   19/97
+      │   ┃ > 1
+      │   ┗━━━━━━━━━━
+      │       3
+      │       2
+      │       1
+      │
+      ╰──────────────
+    BLOCK
+    tmux.until { assert_block(block, _1) }
+  end
+
+  def test_header_border_and_label
+    tmux.send_keys %(seq 100 | #{FZF} --border rounded --header-lines 3 --header-border sharp --header-label header --header-label-pos 2:bottom --query 1 --padding 1,2), :Enter
+    block = <<~BLOCK
+      │     12
+      │     11
+      │   > 10
+      │   ┌────────
+      │   │ 3
+      │   │ 2
+      │   │ 1
+      │   └header──
+      │     19/97 ─
+      │   > 1
+      │
+      ╰────────────
+    BLOCK
+    tmux.until { assert_block(block, _1) }
+  end
+
+  def test_header_border_and_label_header_first
+    tmux.send_keys %(seq 100 | #{FZF} --border rounded --header-lines 3 --header-border sharp --header-label header --header-label-pos 2:bottom --query 1 --padding 1,2 --header-first), :Enter
+    block = <<~BLOCK
+      │     12
+      │     11
+      │   > 10
+      │     19/97 ─
+      │   > 1
+      │   ┌────────
+      │   │ 3
+      │   │ 2
+      │   │ 1
+      │   └header──
+      │
+      ╰────────────
+    BLOCK
+    tmux.until { assert_block(block, _1) }
+  end
+
+  def test_header_border_and_label_with_list_border
+    tmux.send_keys %(seq 100 | #{FZF} --border rounded --list-border double --list-label list --list-label-pos 2:bottom --header-lines 3 --header-border sharp --header-label header --header-label-pos 2:bottom --query 1 --padding 1,2), :Enter
+    block = <<~BLOCK
+      │   ║   12
+      │   ║   11
+      │   ║ > 10
+      │   ╚list════
+      │   ┌────────
+      │   │   3
+      │   │   2
+      │   │   1
+      │   └header──
+      │     19/97 ─
+      │   > 1
+      │
+      ╰────────────
+    BLOCK
+    tmux.until { assert_block(block, _1) }
+  end
+
+  def test_header_border_and_label_with_list_border_header_first
+    tmux.send_keys %(seq 100 | #{FZF} --border rounded --list-border double --list-label list --list-label-pos 2:bottom --header-lines 3 --header-border sharp --header-label header --header-label-pos 2:bottom --query 1 --padding 1,2 --header-first), :Enter
+    block = <<~BLOCK
+      │   ║   12
+      │   ║   11
+      │   ║ > 10
+      │   ╚list════
+      │     19/97 ─
+      │   > 1
+      │   ┌────────
+      │   │   3
+      │   │   2
+      │   │   1
+      │   └header──
+      │
+      ╰────────────
+    BLOCK
+    tmux.until { assert_block(block, _1) }
+  end
+
+  def test_all_borders
+    tmux.send_keys %(seq 100 | #{FZF} --border rounded --list-border double --list-label list --list-label-pos 2:bottom --header-lines 3 --header-border sharp --header-label header --header-label-pos 2:bottom --query 1 --padding 1,2 --input-border bold --input-label input --input-label-pos 2:bottom), :Enter
+    block = <<~BLOCK
+      │   ║   12
+      │   ║   11
+      │   ║ > 10
+      │   ╚list══════
+      │   ┌──────────
+      │   │   3
+      │   │   2
+      │   │   1
+      │   └header────
+      │   ┏━━━━━━━━━━
+      │   ┃   19/97
+      │   ┃ > 1
+      │   ┗input━━━━━
+      │
+      ╰──────────────
+    BLOCK
+    tmux.until { assert_block(block, _1) }
+  end
+
+  def test_all_borders_header_first
+    tmux.send_keys %(seq 100 | #{FZF} --border rounded --list-border double --list-label list --list-label-pos 2:bottom --header-lines 3 --header-border sharp --header-label header --header-label-pos 2:bottom --query 1 --padding 1,2 --input-border bold --input-label input --input-label-pos 2:bottom --header-first), :Enter
+    block = <<~BLOCK
+      │   ║   12
+      │   ║   11
+      │   ║ > 10
+      │   ╚list══════
+      │   ┏━━━━━━━━━━
+      │   ┃   19/97
+      │   ┃ > 1
+      │   ┗input━━━━━
+      │   ┌──────────
+      │   │   3
+      │   │   2
+      │   │   1
+      │   └header────
+      │
+      ╰──────────────
+    BLOCK
+    tmux.until { assert_block(block, _1) }
+  end
+
+  def test_style_full_adaptive_height
+    tmux.send_keys %(seq 1| #{FZF} --style=full --height=~100% --header-lines=1 --info=default), :Enter
+    block = <<~BLOCK
+      ╭────────
+      ╰────────
+      ╭────────
+      │   1
+      ╰────────
+      ╭────────
+      │   0/0
+      │ >
+      ╰────────
+    BLOCK
+    tmux.until { assert_block(block, _1) }
+  end
+
+  def test_style_full_adaptive_height_double
+    tmux.send_keys %(seq 1| #{FZF} --style=full:double --border --height=~100% --header-lines=1 --info=default), :Enter
+    block = <<~BLOCK
+      ╔══════════
+      ║ ╔════════
+      ║ ╚════════
+      ║ ╔════════
+      ║ ║   1
+      ║ ╚════════
+      ║ ╔════════
+      ║ ║   0/0
+      ║ ║ >
+      ║ ╚════════
+      ╚══════════
+    BLOCK
+    tmux.until { assert_block(block, _1) }
+  end
+
+  def test_change_nth
+    input = [
+      *[''] * 1000,
+      'foo bar bar bar bar',
+      'foo foo bar bar bar',
+      'foo foo foo bar bar',
+      'foo foo foo foo bar',
+      *[''] * 1000
+    ]
+    writelines(input)
+    nths = '1,2..4,-1,-3..,..2'
+    tmux.send_keys %(#{FZF} -qfoo -n#{nths} --bind 'space:change-nth(2|3|4|5|),result:transform-prompt:echo "[$FZF_NTH] "' < #{tempname}), :Enter
+
+    tmux.until do |lines|
+      assert lines.any_include?("[#{nths}] foo")
+      assert_equal 4, lines.match_count
+    end
+    tmux.send_keys :Space
+    tmux.until do |lines|
+      assert lines.any_include?('[2] foo')
+      assert_equal 3, lines.match_count
+    end
+    tmux.send_keys :Space
+    tmux.until do |lines|
+      assert lines.any_include?('[3] foo')
+      assert_equal 2, lines.match_count
+    end
+    tmux.send_keys :Space
+    tmux.until do |lines|
+      assert lines.any_include?('[4] foo')
+      assert_equal 1, lines.match_count
+    end
+    tmux.send_keys :Space
+    tmux.until do |lines|
+      assert lines.any_include?('[5] foo')
+      assert_equal 0, lines.match_count
+    end
+    tmux.send_keys :Space
+    tmux.until do |lines|
+      assert lines.any_include?("[#{nths}] foo")
+      assert_equal 4, lines.match_count
+    end
   end
 end
 
