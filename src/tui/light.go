@@ -32,6 +32,10 @@ const consoleDevice string = "/dev/tty"
 var offsetRegexp = regexp.MustCompile("(.*)\x1b\\[([0-9]+);([0-9]+)R")
 var offsetRegexpBegin = regexp.MustCompile("^\x1b\\[[0-9]+;[0-9]+R")
 
+func (r *LightRenderer) Bell() {
+	r.flushRaw("\a")
+}
+
 func (r *LightRenderer) PassThrough(str string) {
 	r.queued.WriteString("\x1b7" + str + "\x1b8")
 }
@@ -73,7 +77,13 @@ func (r *LightRenderer) csi(code string) string {
 
 func (r *LightRenderer) flush() {
 	if r.queued.Len() > 0 {
-		r.flushRaw("\x1b[?7l\x1b[?25l" + r.queued.String() + "\x1b[?25h\x1b[?7h")
+		raw := "\x1b[?7l\x1b[?25l" + r.queued.String()
+		if r.showCursor {
+			raw += "\x1b[?25h\x1b[?7h"
+		} else {
+			raw += "\x1b[?7h"
+		}
+		r.flushRaw(raw)
 		r.queued.Reset()
 	}
 }
@@ -106,6 +116,7 @@ type LightRenderer struct {
 	y             int
 	x             int
 	maxHeightFunc func(int) int
+	showCursor    bool
 
 	// Windows only
 	ttyinChannel    chan byte
@@ -148,7 +159,8 @@ func NewLightRenderer(ttyin *os.File, theme *ColorTheme, forceBlack bool, mouse 
 		tabstop:       tabstop,
 		fullscreen:    fullscreen,
 		upOneLine:     false,
-		maxHeightFunc: maxHeightFunc}
+		maxHeightFunc: maxHeightFunc,
+		showCursor:    true}
 	return &r, nil
 }
 
@@ -622,15 +634,13 @@ func (r *LightRenderer) mouseSequence(sz *int) Event {
 
 	// middle := t & 0b1
 	left := t&0b11 == 0
-
-	// shift := t & 0b100
-	// ctrl := t & 0b1000
-	mod := t&0b1100 > 0
-
-	drag := t&0b100000 > 0
+	ctrl := t&0b10000 > 0
+	alt := t&0b01000 > 0
+	shift := t&0b00100 > 0
+	drag := t&0b100000 > 0 // 32
 
 	if scroll != 0 {
-		return Event{Mouse, 0, &MouseEvent{y, x, scroll, false, false, false, mod}}
+		return Event{Mouse, 0, &MouseEvent{y, x, scroll, false, false, false, ctrl, alt, shift}}
 	}
 
 	double := false
@@ -654,7 +664,7 @@ func (r *LightRenderer) mouseSequence(sz *int) Event {
 			}
 		}
 	}
-	return Event{Mouse, 0, &MouseEvent{y, x, 0, left, down, double, mod}}
+	return Event{Mouse, 0, &MouseEvent{y, x, 0, left, down, double, ctrl, alt, shift}}
 }
 
 func (r *LightRenderer) smcup() {
@@ -756,6 +766,9 @@ func (r *LightRenderer) Close() {
 		}
 	} else if !r.fullscreen {
 		r.csi("u")
+	}
+	if !r.showCursor {
+		r.csi("?25h")
 	}
 	r.disableMouse()
 	r.flush()
@@ -1211,4 +1224,14 @@ func (w *LightWindow) Erase() {
 
 func (w *LightWindow) EraseMaybe() bool {
 	return false
+}
+
+func (r *LightRenderer) HideCursor() {
+	r.showCursor = false
+	r.csi("?25l")
+}
+
+func (r *LightRenderer) ShowCursor() {
+	r.showCursor = true
+	r.csi("?25h")
 }

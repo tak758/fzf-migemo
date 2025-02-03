@@ -11,8 +11,8 @@ github.com/koron/go-skkdict v0.0.0-20160727125427-1bfa372d61d2/go.mod h1:RHH1ylF
 github.com/koron/gomigemo v0.0.0-20210612172932-2cc85a8ebac1 h1:c8En066E9zzXkMTsc5NsaDLLbJtHFJ+0DptfAV9u6C4=
 github.com/koron/gomigemo v0.0.0-20210612172932-2cc85a8ebac1/go.mod h1:gc/0myyTk3JFTaDG9+2TV6tE24BxxUXnQO1cn4WSjM8=
 github.com/google/go-cmp v0.6.0/go.mod h1:17dUlkBOakJ0+DkrSSNjCkIjxS6bF9zb3elmeNGIjoY=
-github.com/junegunn/go-shellwords v0.0.0-20240813092932-a62c48c52e97 h1:rqzLixVo1c/GQW6px9j1xQmlvQIn+lf/V6M1UQ7IFzw=
-github.com/junegunn/go-shellwords v0.0.0-20240813092932-a62c48c52e97/go.mod h1:6EILKtGpo5t+KLb85LNZLAF6P9LKp78hJI80PXMcn3c=
+github.com/junegunn/go-shellwords v0.0.0-20250127100254-2aa3b3277741 h1:7dYDtfMDfKzjT+DVfIS4iqknSEKtZpEcXtu6vuaasHs=
+github.com/junegunn/go-shellwords v0.0.0-20250127100254-2aa3b3277741/go.mod h1:6EILKtGpo5t+KLb85LNZLAF6P9LKp78hJI80PXMcn3c=
 github.com/lucasb-eyer/go-colorful v1.2.0 h1:1nnpGOrhyZZuNyfu1QjKiUICQ74+3FNCN69Aj6K7nkY=
 github.com/lucasb-eyer/go-colorful v1.2.0/go.mod h1:R4dSotOR9KMtayYi1e77YzuveK+i7ruzyGqttikkLy0=
 github.com/mattn/go-isatty v0.0.20 h1:xfD0iDuEKnDkl03q4limB+vH+GxLEtL/jb4xVJSWWEY=

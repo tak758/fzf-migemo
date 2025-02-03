@@ -28,7 +28,7 @@ const (
 	CtrlJ
 	CtrlK
 	CtrlL
-	CtrlM
+	Enter
 	CtrlN
 	CtrlO
 	CtrlP
@@ -150,12 +150,19 @@ func (e Event) Comparable() Event {
 }
 
 func (e Event) KeyName() string {
+	if me := e.MouseEvent; me != nil {
+		return me.Name()
+	}
+
 	if e.Type >= Invalid {
 		return ""
 	}
 
 	switch e.Type {
 	case Rune:
+		if e.Char == ' ' {
+			return "space"
+		}
 		return string(e.Char)
 	case Alt:
 		return "alt-" + string(e.Char)
@@ -367,7 +374,37 @@ type MouseEvent struct {
 	Left   bool
 	Down   bool
 	Double bool
-	Mod    bool
+	Ctrl   bool
+	Alt    bool
+	Shift  bool
+}
+
+func (e MouseEvent) Mod() bool {
+	return e.Ctrl || e.Alt || e.Shift
+}
+
+func (e MouseEvent) Name() string {
+	name := ""
+	if e.Down {
+		return name
+	}
+
+	if e.Ctrl {
+		name += "ctrl-"
+	}
+	if e.Alt {
+		name += "alt-"
+	}
+	if e.Shift {
+		name += "shift-"
+	}
+	if e.Double {
+		name += "double-"
+	}
+	if !e.Left {
+		name += "right-"
+	}
+	return name + "click"
 }
 
 type BorderShape int
@@ -376,6 +413,7 @@ const (
 	BorderUndefined BorderShape = iota
 	BorderLine
 	BorderNone
+	BorderPhantom
 	BorderRounded
 	BorderSharp
 	BorderBold
@@ -392,7 +430,7 @@ const (
 
 func (s BorderShape) HasLeft() bool {
 	switch s {
-	case BorderNone, BorderLine, BorderRight, BorderTop, BorderBottom, BorderHorizontal: // No Left
+	case BorderNone, BorderPhantom, BorderLine, BorderRight, BorderTop, BorderBottom, BorderHorizontal: // No Left
 		return false
 	}
 	return true
@@ -400,7 +438,7 @@ func (s BorderShape) HasLeft() bool {
 
 func (s BorderShape) HasRight() bool {
 	switch s {
-	case BorderNone, BorderLine, BorderLeft, BorderTop, BorderBottom, BorderHorizontal: // No right
+	case BorderNone, BorderPhantom, BorderLine, BorderLeft, BorderTop, BorderBottom, BorderHorizontal: // No right
 		return false
 	}
 	return true
@@ -408,7 +446,7 @@ func (s BorderShape) HasRight() bool {
 
 func (s BorderShape) HasTop() bool {
 	switch s {
-	case BorderNone, BorderLine, BorderLeft, BorderRight, BorderBottom, BorderVertical: // No top
+	case BorderNone, BorderPhantom, BorderLine, BorderLeft, BorderRight, BorderBottom, BorderVertical: // No top
 		return false
 	}
 	return true
@@ -416,7 +454,7 @@ func (s BorderShape) HasTop() bool {
 
 func (s BorderShape) HasBottom() bool {
 	switch s {
-	case BorderNone, BorderLine, BorderLeft, BorderRight, BorderTop, BorderVertical: // No bottom
+	case BorderNone, BorderPhantom, BorderLine, BorderLeft, BorderRight, BorderTop, BorderVertical: // No bottom
 		return false
 	}
 	return true
@@ -441,7 +479,7 @@ type BorderStyle struct {
 type BorderCharacter int
 
 func MakeBorderStyle(shape BorderShape, unicode bool) BorderStyle {
-	if shape == BorderNone {
+	if shape == BorderNone || shape == BorderPhantom {
 		return BorderStyle{
 			shape:       shape,
 			top:         ' ',
@@ -579,6 +617,9 @@ type Renderer interface {
 	PassThrough(string)
 	NeedScrollbarRedraw() bool
 	ShouldEmitResizeEvent() bool
+	Bell()
+	HideCursor()
+	ShowCursor()
 
 	GetChar() Event
 
@@ -626,6 +667,7 @@ type FullscreenRenderer struct {
 	forceBlack   bool
 	prevDownTime time.Time
 	clicks       [][2]int
+	showCursor   bool
 }
 
 func NewFullscreenRenderer(theme *ColorTheme, forceBlack bool, mouse bool) Renderer {
@@ -634,7 +676,8 @@ func NewFullscreenRenderer(theme *ColorTheme, forceBlack bool, mouse bool) Rende
 		mouse:        mouse,
 		forceBlack:   forceBlack,
 		prevDownTime: time.Unix(0, 0),
-		clicks:       [][2]int{}}
+		clicks:       [][2]int{},
+		showCursor:   true}
 	return r
 }
 
