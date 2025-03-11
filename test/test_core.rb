@@ -238,6 +238,11 @@ class TestCore < TestInteractive
     assert_equal %w[5555 55], fzf_output_lines
   end
 
+  def test_select_1_accept_nth
+    tmux.send_keys "seq 1 100 | #{fzf(:with_nth, '..,..', :print_query, :q, 5555, :'1', :accept_nth, '"{1} // {1}"')}", :Enter
+    assert_equal ['5555', '55 // 55'], fzf_output_lines
+  end
+
   def test_exit_0
     tmux.send_keys "seq 1 100 | #{fzf(:with_nth, '..,..', :print_query, :q, 555_555, :'0')}", :Enter
     assert_equal %w[555555], fzf_output_lines
@@ -825,6 +830,24 @@ class TestCore < TestInteractive
     tmux.until { |lines| assert_includes lines[-7], '5 5' }
     tmux.send_keys 'C-c'
     tmux.until { |lines| assert(lines.any? { it.include?('jump cancelled at 3') }) }
+  end
+
+  def test_jump_no_pointer
+    tmux.send_keys "seq 100 | #{FZF} --pointer= --jump-labels 12345 --bind ctrl-j:jump", :Enter
+    tmux.until { |lines| assert_equal 100, lines.match_count }
+    tmux.send_keys 'C-j'
+    tmux.until { |lines| assert_equal '5 5', lines[-7] }
+    tmux.send_keys 'C-c'
+    tmux.until { |lines| assert_equal ' 5', lines[-7] }
+  end
+
+  def test_jump_no_pointer_no_marker
+    tmux.send_keys "seq 100 | #{FZF} --pointer= --marker= --jump-labels 12345 --bind ctrl-j:jump", :Enter
+    tmux.until { |lines| assert_equal 100, lines.match_count }
+    tmux.send_keys 'C-j'
+    tmux.until { |lines| assert_equal '55', lines[-7] }
+    tmux.send_keys 'C-c'
+    tmux.until { |lines| assert_equal '5', lines[-7] }
   end
 
   def test_pointer
@@ -1663,6 +1686,131 @@ class TestCore < TestInteractive
     wait do
       assert_path_exists tempname
       assert_equal '', File.read(tempname).chomp
+    end
+  end
+
+  def test_exclude_multi
+    tmux.send_keys %(seq 1000 | #{FZF} --multi --bind 'a:exclude-multi,b:reload(seq 1000),c:reload-sync(seq 1000)'), :Enter
+
+    tmux.until do |lines|
+      assert_equal 1000, lines.match_count
+      assert_includes lines, '> 1'
+    end
+    tmux.send_keys :a
+    tmux.until do |lines|
+      assert_includes lines, '> 2'
+      assert_equal 999, lines.match_count
+    end
+    tmux.send_keys :Up, :BTab, :BTab, :BTab, :a
+    tmux.until do |lines|
+      assert_equal 996, lines.match_count
+      assert_includes lines, '> 9'
+    end
+    tmux.send_keys :b
+    tmux.until do |lines|
+      assert_equal 1000, lines.match_count
+      assert_includes lines, '> 5'
+    end
+    tmux.send_keys :Tab, :Tab, :Tab, :a
+    tmux.until do |lines|
+      assert_equal 997, lines.match_count
+      assert_includes lines, '> 2'
+    end
+    tmux.send_keys :c
+    tmux.until do |lines|
+      assert_equal 1000, lines.match_count
+      assert_includes lines, '> 2'
+    end
+
+    # TODO: We should also check the behavior of 'exclude' during reloads
+  end
+
+  def test_exclude
+    tmux.send_keys %(seq 1000 | #{FZF} --multi --bind 'a:exclude,b:reload(seq 1000),c:reload-sync(seq 1000)'), :Enter
+
+    tmux.until do |lines|
+      assert_equal 1000, lines.match_count
+      assert_includes lines, '> 1'
+    end
+    tmux.send_keys :a
+    tmux.until do |lines|
+      assert_includes lines, '> 2'
+      assert_equal 999, lines.match_count
+    end
+    tmux.send_keys :Up, :BTab, :BTab, :BTab, :a
+    tmux.until do |lines|
+      assert_equal 998, lines.match_count
+      assert_equal 3, lines.select_count
+      assert_includes lines, '> 7'
+    end
+    tmux.send_keys :b
+    tmux.until do |lines|
+      assert_equal 1000, lines.match_count
+      assert_equal 0, lines.select_count
+      assert_includes lines, '> 5'
+    end
+    tmux.send_keys :Tab, :Tab, :Tab, :a
+    tmux.until do |lines|
+      assert_equal 999, lines.match_count
+      assert_equal 3, lines.select_count
+      assert_includes lines, '>>3'
+    end
+    tmux.send_keys :a
+    tmux.until do |lines|
+      assert_equal 998, lines.match_count
+      assert_equal 2, lines.select_count
+      assert_includes lines, '>>4'
+    end
+    tmux.send_keys :c
+    tmux.until do |lines|
+      assert_equal 1000, lines.match_count
+      assert_includes lines, '> 2'
+    end
+
+    # TODO: We should also check the behavior of 'exclude' during reloads
+  end
+
+  def test_accept_nth
+    tmux.send_keys %((echo "foo  bar  baz"; echo "bar baz  foo") | #{FZF} --multi --accept-nth 2,2 --sync --bind start:select-all+accept > #{tempname}), :Enter
+    wait do
+      assert_path_exists tempname
+      assert_equal ['bar  bar', 'baz  baz'], File.readlines(tempname, chomp: true)
+    end
+  end
+
+  def test_accept_nth_string_delimiter
+    tmux.send_keys %(echo "foo  ,bar,baz" | #{FZF} -d, --accept-nth 2,2,1,3,1 --sync --bind start:accept > #{tempname}), :Enter
+    wait do
+      assert_path_exists tempname
+      # Last delimiter and the whitespaces are removed
+      assert_equal ['bar,bar,foo  ,bazfoo'], File.readlines(tempname, chomp: true)
+    end
+  end
+
+  def test_accept_nth_regex_delimiter
+    tmux.send_keys %(echo "foo  :,:bar,baz" | #{FZF} --delimiter='[:,]+' --accept-nth 2,2,1,3,1 --sync --bind start:accept > #{tempname}), :Enter
+    wait do
+      assert_path_exists tempname
+      # Last delimiter and the whitespaces are removed
+      assert_equal ['bar,bar,foo  :,:bazfoo'], File.readlines(tempname, chomp: true)
+    end
+  end
+
+  def test_accept_nth_regex_delimiter_strip_last
+    tmux.send_keys %((echo "foo:,bar:,baz"; echo "foo:,bar:,baz:,qux:,") | #{FZF} --multi --delimiter='[:,]+' --accept-nth 2.. --sync --bind 'load:select-all+accept' > #{tempname}), :Enter
+    wait do
+      assert_path_exists tempname
+      # Last delimiter and the whitespaces are removed
+      assert_equal ['bar:,baz', 'bar:,baz:,qux'], File.readlines(tempname, chomp: true)
+    end
+  end
+
+  def test_accept_nth_template
+    tmux.send_keys %(echo "foo  ,bar,baz" | #{FZF} -d, --accept-nth '[{n}] 1st: {1}, 3rd: {3}, 2nd: {2}' --sync --bind start:accept > #{tempname}), :Enter
+    wait do
+      assert_path_exists tempname
+      # Last delimiter and the whitespaces are removed
+      assert_equal ['[0] 1st: foo, 3rd: baz, 2nd: bar'], File.readlines(tempname, chomp: true)
     end
   end
 end

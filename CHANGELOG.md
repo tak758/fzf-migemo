@@ -1,6 +1,67 @@
 CHANGELOG
 =========
 
+0.60.3
+------
+- Bug fixes and improvements
+    - [fish] Enable multiple history commands insertion (#4280) (@bitraid)
+    - [walker] Append '/' to directory entries on MSYS2 (#4281)
+    - Trim trailing whitespaces after processing ANSI sequences (#4282)
+    - Remove temp files before `become` when using `--tmux` option (#4283)
+    - Fix condition for using item numlines cache (#4285) (@alex-huff)
+    - Make `--accept-nth` compatible with `--select-1` (#4287)
+    - Increase the query length limit from 300 to 1000 (#4292)
+    - [windows] Prevent fzf from consuming user input while paused (#4260)
+
+0.60.2
+------
+- Template for `--with-nth` and `--accept-nth` now supports `{n}` which evaluates to the zero-based ordinal index of the item
+- Fixed a regression that caused the last field in the "nth" expression to be trimmed when a regular expression delimiter is used
+    - Thanks to @phanen for the fix
+- Fixed 'jump' action when the pointer is an empty string
+
+0.60.1
+------
+- Bug fixes and minor improvements
+    - Built-in walker now prints directory entries with a trailing slash
+    - Fixed a bug causing unexpected behavior with [fzf-tab](https://github.com/Aloxaf/fzf-tab). Please upgrade if you use it.
+- Thanks to @alexeisersun, @bitraid, @Lompik, and @fsc0 for the contributions
+
+0.60.0
+------
+_Release highlights: https://junegunn.github.io/fzf/releases/0.60.0/_
+
+- Added `--accept-nth` for choosing output fields
+  ```sh
+  ps -ef | fzf --multi --header-lines 1 | awk '{print $2}'
+  # Becomes
+  ps -ef | fzf --multi --header-lines 1 --accept-nth 2
+
+  git branch | fzf | cut -c3-
+  # Can be rewritten as
+  git branch | fzf --accept-nth -1
+  ```
+- `--accept-nth` and `--with-nth` now support a template that includes multiple field index expressions in curly braces
+  ```sh
+  echo foo,bar,baz | fzf --delimiter , --accept-nth '{1}, {3}, {2}'
+    # foo, baz, bar
+
+  echo foo,bar,baz | fzf --delimiter , --with-nth '{1},{3},{2},{1..2}'
+    # foo,baz,bar,foo,bar
+  ```
+- Added `exclude` and `exclude-multi` actions for dynamically excluding items
+  ```sh
+  seq 100 | fzf --bind 'ctrl-x:exclude'
+
+  # 'exclude-multi' will exclude the selected items or the current item
+  seq 100 | fzf --multi --bind 'ctrl-x:exclude-multi'
+  ```
+- Preview window now prints wrap indicator when wrapping is enabled
+  ```sh
+  seq 100 | xargs | fzf --wrap --preview 'echo {}' --preview-window wrap
+  ```
+- Bug fixes and improvements
+
 0.59.0
 ------
 _Release highlights: https://junegunn.github.io/fzf/releases/0.59.0/_
@@ -365,7 +426,7 @@ _Release highlights: https://junegunn.github.io/fzf/releases/0.54.0/_
 - fzf will not start the initial reader when `reload` or `reload-sync` is bound to `start` event. `fzf < /dev/null` or `: | fzf` are no longer required and extraneous `load` event will not fire due to the empty list.
   ```sh
   # Now this will work as expected. Previously, this would print an invalid header line.
-  # `fzf < /dev/null` or `: | fzf` would fix the problem, but then an extraneous 
+  # `fzf < /dev/null` or `: | fzf` would fix the problem, but then an extraneous
   # `load` event would fire and the header would be prematurely updated.
   fzf --header 'Loading ...' --header-lines 1 \
       --bind 'start:reload:sleep 1; ps -ef' \
