@@ -1,6 +1,34 @@
 CHANGELOG
 =========
 
+0.61.3
+------
+- Reverted #4351 as it caused `tmux run-shell 'fzf --tmux'` to fail (#4559 #4560)
+- More environment variables for child processes (#4356)
+
+0.61.2
+------
+- Fixed panic when using header border without pointer/marker (@phanen)
+- Fixed `--tmux` option when already inside a tmux popup (@peikk0)
+- Bug fixes and improvements in CTRL-T binding of fish (#4334) (@bitraid)
+- Added `--no-tty-default` option to make fzf search for the current TTY device instead of defaulting to `/dev/tty` (#4242)
+
+0.61.1
+------
+- Disable bracketed-paste mode on exit. This fixes issue where pasting breaks after running fzf on old bash versions that don't support the mode.
+
+0.61.0
+------
+- Added `--ghost=TEXT` to display a ghost text when the input is empty
+  ```sh
+  # Display "Type to search" when the input is empty
+  fzf --ghost "Type to search"
+  ```
+- Added `change-ghost` and `transform-ghost` actions for dynamically changing the ghost text
+- Added `change-pointer` and `transform-pointer` actions for dynamically changing the pointer sign
+- Added `r` flag for placeholder expression (raw mode) for unquoted output
+- Bug fixes and improvements
+
 0.60.3
 ------
 - Bug fixes and improvements

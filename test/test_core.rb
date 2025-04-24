@@ -1632,14 +1632,16 @@ class TestCore < TestInteractive
   end
 
   def test_env_vars
-    def to_vars(lines)
-      lines.select { it.start_with?('FZF_') }.to_h do
-        key, val = it.split('=', 2)
+    def env_vars
+      return {} unless File.exist?(tempname)
+
+      File.readlines(tempname).select { it.start_with?('FZF_') }.to_h do
+        key, val = it.chomp.split('=', 2)
         [key.to_sym, val]
       end
     end
 
-    tmux.send_keys %(seq 100 | #{FZF} --multi --reverse --preview-window up,99%,noborder --preview 'env | grep ^FZF_ | sort' --no-input --bind enter:show-input+refresh-preview,space:disable-search+refresh-preview), :Enter
+    tmux.send_keys %(seq 100 | #{FZF} --multi --reverse --preview-window 0 --preview 'env | grep ^FZF_ | sort > #{tempname}' --no-input --bind enter:show-input+refresh-preview,space:disable-search+refresh-preview), :Enter
     expected = {
       FZF_TOTAL_COUNT: '100',
       FZF_MATCH_COUNT: '100',
@@ -1648,31 +1650,32 @@ class TestCore < TestInteractive
       FZF_KEY: '',
       FZF_POS: '1',
       FZF_QUERY: '',
-      FZF_PROMPT: '>',
+      FZF_POINTER: '>',
+      FZF_PROMPT: '> ',
       FZF_INPUT_STATE: 'hidden'
     }
-    tmux.until do |lines|
-      assert_equal expected, to_vars(lines).slice(*expected.keys)
+    tmux.until do
+      assert_equal expected, env_vars.slice(*expected.keys)
     end
     tmux.send_keys :Enter
-    tmux.until do |lines|
+    tmux.until do
       expected.merge!(FZF_INPUT_STATE: 'enabled', FZF_ACTION: 'show-input', FZF_KEY: 'enter')
-      assert_equal expected, to_vars(lines).slice(*expected.keys)
+      assert_equal expected, env_vars.slice(*expected.keys)
     end
     tmux.send_keys :Tab, :Tab
-    tmux.until do |lines|
+    tmux.until do
       expected.merge!(FZF_ACTION: 'toggle-down', FZF_KEY: 'tab', FZF_POS: '3', FZF_SELECT_COUNT: '2')
-      assert_equal expected, to_vars(lines).slice(*expected.keys)
+      assert_equal expected, env_vars.slice(*expected.keys)
     end
     tmux.send_keys '99'
-    tmux.until do |lines|
+    tmux.until do
       expected.merge!(FZF_ACTION: 'char', FZF_KEY: '9', FZF_QUERY: '99', FZF_MATCH_COUNT: '1', FZF_POS: '1')
-      assert_equal expected, to_vars(lines).slice(*expected.keys)
+      assert_equal expected, env_vars.slice(*expected.keys)
     end
     tmux.send_keys :Space
-    tmux.until do |lines|
+    tmux.until do
       expected.merge!(FZF_INPUT_STATE: 'disabled', FZF_ACTION: 'disable-search', FZF_KEY: 'space')
-      assert_equal expected, to_vars(lines).slice(*expected.keys)
+      assert_equal expected, env_vars.slice(*expected.keys)
     end
   end
 
@@ -1812,5 +1815,128 @@ class TestCore < TestInteractive
       # Last delimiter and the whitespaces are removed
       assert_equal ['[0] 1st: foo, 3rd: baz, 2nd: bar'], File.readlines(tempname, chomp: true)
     end
+  end
+
+  def test_ghost
+    tmux.send_keys %(seq 100 | #{FZF} --prompt 'X ' --ghost 'Type in query ...' --bind 'space:change-ghost:Y Z' --bind 'enter:transform-ghost:echo Z Y'), :Enter
+    tmux.until do |lines|
+      assert_equal 100, lines.match_count
+      assert_includes lines, 'X Type in query ...'
+    end
+    tmux.send_keys '100'
+    tmux.until do |lines|
+      assert_equal 1, lines.match_count
+      assert_includes lines, 'X 100'
+    end
+    tmux.send_keys 'C-u'
+    tmux.until do |lines|
+      assert_equal 100, lines.match_count
+      assert_includes lines, 'X Type in query ...'
+    end
+    tmux.send_keys :Space
+    tmux.until { |lines| assert_includes lines, 'X Y Z' }
+    tmux.send_keys :Enter
+    tmux.until { |lines| assert_includes lines, 'X Z Y' }
+  end
+
+  def test_ghost_inline
+    tmux.send_keys %(seq 100 | #{FZF} --info 'inline: Y' --no-separator --prompt 'X ' --ghost 'Type in query ...'), :Enter
+    tmux.until do |lines|
+      assert_includes lines, 'X Type in query ... Y100/100'
+    end
+    tmux.send_keys '100'
+    tmux.until do |lines|
+      assert_includes lines, 'X 100  Y1/100'
+    end
+    tmux.send_keys 'C-u'
+    tmux.until do |lines|
+      assert_includes lines, 'X Type in query ... Y100/100'
+    end
+  end
+
+  def test_offset_middle
+    tmux.send_keys %(seq 1000 | #{FZF} --sync --no-input --reverse --height 5 --scroll-off 0 --bind space:offset-middle), :Enter
+    line = nil
+    tmux.until { |lines| line = lines.index('> 1') }
+    tmux.send_keys :PgDn
+    tmux.until { |lines| assert_includes lines[line + 4], "> 5" }
+    tmux.send_keys :Space
+    tmux.until { |lines| assert_includes lines[line + 2], "> 5" }
+  end
+
+  def test_no_input_query
+    tmux.send_keys %(seq 1000 | #{FZF} --no-input --query 555 --bind space:toggle-input), :Enter
+    tmux.until { |lines| assert_includes lines, '> 555' }
+    tmux.send_keys :Space
+    tmux.until do |lines|
+      assert_equal 1, lines.match_count
+      assert_includes lines, '> 555'
+    end
+  end
+
+  def test_no_input_change_query
+    tmux.send_keys %(seq 1000 | #{FZF} --multi --query 999 --no-input --bind 'enter:show-input+change-query(555)+hide-input,space:change-query(555)+select'), :Enter
+    tmux.until { |lines| assert_includes lines, '> 999' }
+    tmux.send_keys :Space
+    tmux.until do |lines|
+      assert_includes lines, '>>999'
+      refute_includes lines, '> 555'
+    end
+    tmux.send_keys :Enter
+    tmux.until do |lines|
+      refute_includes lines, '>>999'
+      assert_includes lines, '> 555'
+    end
+  end
+
+  def test_search_override_query_in_no_input_mode
+    tmux.send_keys %(seq 1000 | #{FZF} --sync --no-input --bind 'enter:show-input+change-query(555)+hide-input+search(999),space:search(111)+show-input+change-query(777)'), :Enter
+    tmux.until { |lines| assert_includes lines, '> 1' }
+    tmux.send_keys :Enter
+    tmux.until { |lines| assert_includes lines, '> 999' }
+    tmux.send_keys :Space
+    tmux.until { |lines| assert_includes lines, '> 777' }
+  end
+
+  def test_change_pointer
+    tmux.send_keys %(seq 2 | #{FZF} --bind 'a:change-pointer(a),b:change-pointer(bb),c:change-pointer(),d:change-pointer(ddd)'), :Enter
+    tmux.until { |lines| assert_includes lines, '> 1' }
+    tmux.send_keys 'a'
+    tmux.until { |lines| assert_includes lines, 'a 1' }
+    tmux.send_keys 'b'
+    tmux.until { |lines| assert_includes lines, 'bb 1' }
+    tmux.send_keys 'c'
+    tmux.until { |lines| assert_includes lines, ' 1' }
+    tmux.send_keys 'd'
+    tmux.until { |lines| refute_includes lines, 'ddd 1' }
+    tmux.send_keys :Up
+    tmux.until { |lines| assert_includes lines, ' 2' }
+  end
+
+  def test_transform_pointer
+    tmux.send_keys %(seq 2 | #{FZF} --bind 'a:transform-pointer(echo a),b:transform-pointer(echo bb),c:transform-pointer(),d:transform-pointer(echo ddd)'), :Enter
+    tmux.until { |lines| assert_includes lines, '> 1' }
+    tmux.send_keys 'a'
+    tmux.until { |lines| assert_includes lines, 'a 1' }
+    tmux.send_keys 'b'
+    tmux.until { |lines| assert_includes lines, 'bb 1' }
+    tmux.send_keys 'c'
+    tmux.until { |lines| assert_includes lines, ' 1' }
+    tmux.send_keys 'd'
+    tmux.until { |lines| refute_includes lines, 'ddd 1' }
+    tmux.send_keys :Up
+    tmux.until { |lines| assert_includes lines, ' 2' }
+  end
+
+  def test_change_header_on_header_window
+    tmux.send_keys %(seq 100 | #{FZF} --list-border --input-border --bind 'start:change-header(foo),space:change-header(bar)'), :Enter
+    tmux.until { |lines| assert lines.any_include?('foo') }
+    tmux.send_keys :Space
+    tmux.until { |lines| assert lines.any_include?('bar') }
+  end
+
+  def test_trailing_new_line
+    tmux.send_keys %(echo -en "foo\n" | fzf --read0 --no-multi-line), :Enter
+    tmux.until { |lines| assert_includes lines, '> foo␊' }
   end
 end

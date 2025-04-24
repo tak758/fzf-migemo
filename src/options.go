@@ -136,6 +136,7 @@ Usage: fzf [options]
     --separator=STR          Draw horizontal separator on info line using the string
                              (default: '─' or '-')
     --no-separator           Hide info line separator
+    --ghost=TEXT             Ghost text to display when the input is empty
     --filepath-word          Make word-wise movements respect path separators
     --input-border[=STYLE]   Draw border around the input section
                              [rounded|sharp|bold|block|thinblock|double|horizontal|vertical|
@@ -574,6 +575,7 @@ type Options struct {
 	InfoStyle         infoStyle
 	InfoPrefix        string
 	InfoCommand       string
+	Ghost             string
 	Separator         *string
 	JumpLabels        string
 	Prompt            string
@@ -629,6 +631,7 @@ type Options struct {
 	MEMProfile        string
 	BlockProfile      string
 	MutexProfile      string
+	TtyDefault        string
 }
 
 func filterNonEmpty(input []string) []string {
@@ -689,6 +692,7 @@ func defaultOptions() *Options {
 		ScrollOff:    3,
 		FileWord:     false,
 		InfoStyle:    infoDefault,
+		Ghost:        "",
 		Separator:    nil,
 		JumpLabels:   defaultJumpLabels,
 		Prompt:       "> ",
@@ -727,6 +731,7 @@ func defaultOptions() *Options {
 		WalkerOpts:   walkerOpts{file: true, hidden: true, follow: true},
 		WalkerRoot:   []string{"."},
 		WalkerSkip:   []string{".git", "node_modules"},
+		TtyDefault:   tui.DefaultTtyDevice,
 		Help:         false,
 		Version:      false}
 }
@@ -1401,7 +1406,7 @@ const (
 
 func init() {
 	executeRegexp = regexp.MustCompile(
-		`(?si)[:+](become|execute(?:-multi|-silent)?|reload(?:-sync)?|preview|(?:change|transform)-(?:query|prompt|(?:border|list|preview|input|header)-label|header|search|nth)|transform|change-(?:preview-window|preview|multi)|(?:re|un|toggle-)bind|pos|put|print|search)`)
+		`(?si)[:+](become|execute(?:-multi|-silent)?|reload(?:-sync)?|preview|(?:change|transform)-(?:query|prompt|(?:border|list|preview|input|header)-label|header|search|nth|pointer|ghost)|transform|change-(?:preview-window|preview|multi)|(?:re|un|toggle-)bind|pos|put|print|search)`)
 	splitRegexp = regexp.MustCompile("[,:]+")
 	actionNameRegexp = regexp.MustCompile("(?i)^[a-z-]+")
 }
@@ -1796,6 +1801,10 @@ func isExecuteAction(str string) actionType {
 		return actChangeInputLabel
 	case "change-header-label":
 		return actChangeHeaderLabel
+	case "change-ghost":
+		return actChangeGhost
+	case "change-pointer":
+		return actChangePointer
 	case "change-preview-window":
 		return actChangePreviewWindow
 	case "change-preview":
@@ -1834,8 +1843,12 @@ func isExecuteAction(str string) actionType {
 		return actTransformHeaderLabel
 	case "transform-header":
 		return actTransformHeader
+	case "transform-ghost":
+		return actTransformGhost
 	case "transform-nth":
 		return actTransformNth
+	case "transform-pointer":
+		return actTransformPointer
 	case "transform-prompt":
 		return actTransformPrompt
 	case "transform-query":
@@ -2325,6 +2338,12 @@ func parseOptions(index *int, opts *Options, allArgs []string) error {
 			}
 		case "--no-tmux":
 			opts.Tmux = nil
+		case "--tty-default":
+			if opts.TtyDefault, err = nextString("tty device name required"); err != nil {
+				return err
+			}
+		case "--no-tty-default":
+			opts.TtyDefault = ""
 		case "--force-tty-in":
 			// NOTE: We need this because `system('fzf --tmux < /dev/tty')` doesn't
 			// work on Neovim. Same as '-' option of fzf-tmux.
@@ -2597,6 +2616,10 @@ func parseOptions(index *int, opts *Options, allArgs []string) error {
 		case "--no-separator":
 			nosep := ""
 			opts.Separator = &nosep
+		case "--ghost":
+			if opts.Ghost, err = nextString("ghost text required"); err != nil {
+				return err
+			}
 		case "--scrollbar":
 			given, bar := optionalNextString()
 			if given {
