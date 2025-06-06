@@ -308,6 +308,12 @@ func (p ColorPair) WithAttr(attr Attr) ColorPair {
 	return dup
 }
 
+func (p ColorPair) WithBg(bg ColorAttr) ColorPair {
+	dup := p
+	bgPair := ColorPair{colUndefined, bg.Color, bg.Attr}
+	return dup.Merge(bgPair)
+}
+
 func (p ColorPair) MergeAttr(other ColorPair) ColorPair {
 	return p.WithAttr(other.attr)
 }
@@ -323,11 +329,13 @@ func (p ColorPair) MergeNonDefault(other ColorPair) ColorPair {
 type ColorTheme struct {
 	Colored          bool
 	Input            ColorAttr
+	Ghost            ColorAttr
 	Disabled         ColorAttr
 	Fg               ColorAttr
 	Bg               ColorAttr
 	ListFg           ColorAttr
 	ListBg           ColorAttr
+	AltBg            ColorAttr
 	Nth              ColorAttr
 	SelectedFg       ColorAttr
 	SelectedBg       ColorAttr
@@ -694,6 +702,7 @@ var (
 	ColNormal               ColorPair
 	ColInput                ColorPair
 	ColDisabled             ColorPair
+	ColGhost                ColorPair
 	ColMatch                ColorPair
 	ColCursor               ColorPair
 	ColCursorEmpty          ColorPair
@@ -735,6 +744,7 @@ func EmptyTheme() *ColorTheme {
 		Bg:               ColorAttr{colUndefined, AttrUndefined},
 		ListFg:           ColorAttr{colUndefined, AttrUndefined},
 		ListBg:           ColorAttr{colUndefined, AttrUndefined},
+		AltBg:            ColorAttr{colUndefined, AttrUndefined},
 		SelectedFg:       ColorAttr{colUndefined, AttrUndefined},
 		SelectedBg:       ColorAttr{colUndefined, AttrUndefined},
 		SelectedMatch:    ColorAttr{colUndefined, AttrUndefined},
@@ -752,6 +762,7 @@ func EmptyTheme() *ColorTheme {
 		BorderLabel:      ColorAttr{colUndefined, AttrUndefined},
 		ListLabel:        ColorAttr{colUndefined, AttrUndefined},
 		ListBorder:       ColorAttr{colUndefined, AttrUndefined},
+		Ghost:            ColorAttr{colUndefined, Dim},
 		Disabled:         ColorAttr{colUndefined, AttrUndefined},
 		PreviewFg:        ColorAttr{colUndefined, AttrUndefined},
 		PreviewBg:        ColorAttr{colUndefined, AttrUndefined},
@@ -780,6 +791,7 @@ func NoColorTheme() *ColorTheme {
 		Bg:               ColorAttr{colDefault, AttrUndefined},
 		ListFg:           ColorAttr{colDefault, AttrUndefined},
 		ListBg:           ColorAttr{colDefault, AttrUndefined},
+		AltBg:            ColorAttr{colUndefined, AttrUndefined},
 		SelectedFg:       ColorAttr{colDefault, AttrUndefined},
 		SelectedBg:       ColorAttr{colDefault, AttrUndefined},
 		SelectedMatch:    ColorAttr{colDefault, AttrUndefined},
@@ -795,6 +807,7 @@ func NoColorTheme() *ColorTheme {
 		Header:           ColorAttr{colDefault, AttrUndefined},
 		Border:           ColorAttr{colDefault, AttrUndefined},
 		BorderLabel:      ColorAttr{colDefault, AttrUndefined},
+		Ghost:            ColorAttr{colDefault, Dim},
 		Disabled:         ColorAttr{colDefault, AttrUndefined},
 		PreviewFg:        ColorAttr{colDefault, AttrUndefined},
 		PreviewBg:        ColorAttr{colDefault, AttrUndefined},
@@ -825,6 +838,7 @@ func init() {
 		Bg:               ColorAttr{colDefault, AttrUndefined},
 		ListFg:           ColorAttr{colUndefined, AttrUndefined},
 		ListBg:           ColorAttr{colUndefined, AttrUndefined},
+		AltBg:            ColorAttr{colUndefined, AttrUndefined},
 		SelectedFg:       ColorAttr{colUndefined, AttrUndefined},
 		SelectedBg:       ColorAttr{colUndefined, AttrUndefined},
 		SelectedMatch:    ColorAttr{colUndefined, AttrUndefined},
@@ -840,6 +854,7 @@ func init() {
 		Header:           ColorAttr{colCyan, AttrUndefined},
 		Border:           ColorAttr{colBlack, AttrUndefined},
 		BorderLabel:      ColorAttr{colWhite, AttrUndefined},
+		Ghost:            ColorAttr{colUndefined, Dim},
 		Disabled:         ColorAttr{colUndefined, AttrUndefined},
 		PreviewFg:        ColorAttr{colUndefined, AttrUndefined},
 		PreviewBg:        ColorAttr{colUndefined, AttrUndefined},
@@ -864,6 +879,7 @@ func init() {
 		Bg:               ColorAttr{colDefault, AttrUndefined},
 		ListFg:           ColorAttr{colUndefined, AttrUndefined},
 		ListBg:           ColorAttr{colUndefined, AttrUndefined},
+		AltBg:            ColorAttr{colUndefined, AttrUndefined},
 		SelectedFg:       ColorAttr{colUndefined, AttrUndefined},
 		SelectedBg:       ColorAttr{colUndefined, AttrUndefined},
 		SelectedMatch:    ColorAttr{colUndefined, AttrUndefined},
@@ -879,6 +895,7 @@ func init() {
 		Header:           ColorAttr{109, AttrUndefined},
 		Border:           ColorAttr{59, AttrUndefined},
 		BorderLabel:      ColorAttr{145, AttrUndefined},
+		Ghost:            ColorAttr{colUndefined, Dim},
 		Disabled:         ColorAttr{colUndefined, AttrUndefined},
 		PreviewFg:        ColorAttr{colUndefined, AttrUndefined},
 		PreviewBg:        ColorAttr{colUndefined, AttrUndefined},
@@ -903,6 +920,7 @@ func init() {
 		Bg:               ColorAttr{colDefault, AttrUndefined},
 		ListFg:           ColorAttr{colUndefined, AttrUndefined},
 		ListBg:           ColorAttr{colUndefined, AttrUndefined},
+		AltBg:            ColorAttr{colUndefined, AttrUndefined},
 		SelectedFg:       ColorAttr{colUndefined, AttrUndefined},
 		SelectedBg:       ColorAttr{colUndefined, AttrUndefined},
 		SelectedMatch:    ColorAttr{colUndefined, AttrUndefined},
@@ -918,6 +936,7 @@ func init() {
 		Header:           ColorAttr{31, AttrUndefined},
 		Border:           ColorAttr{145, AttrUndefined},
 		BorderLabel:      ColorAttr{59, AttrUndefined},
+		Ghost:            ColorAttr{colUndefined, Dim},
 		Disabled:         ColorAttr{colUndefined, AttrUndefined},
 		PreviewFg:        ColorAttr{colUndefined, AttrUndefined},
 		PreviewBg:        ColorAttr{colUndefined, AttrUndefined},
@@ -983,6 +1002,7 @@ func InitTheme(theme *ColorTheme, baseTheme *ColorTheme, forceBlack bool, hasInp
 	theme.SelectedFg = o(theme.ListFg, theme.SelectedFg)
 	theme.SelectedBg = o(theme.ListBg, theme.SelectedBg)
 	theme.SelectedMatch = o(theme.Match, theme.SelectedMatch)
+	theme.Ghost = o(theme.Input, theme.Ghost)
 	theme.Disabled = o(theme.Input, theme.Disabled)
 	theme.Gutter = o(theme.DarkBg, theme.Gutter)
 	theme.PreviewFg = o(theme.Fg, theme.PreviewFg)
@@ -1039,7 +1059,8 @@ func initPalette(theme *ColorTheme) {
 	ColNormal = pair(theme.ListFg, theme.ListBg)
 	ColSelected = pair(theme.SelectedFg, theme.SelectedBg)
 	ColInput = pair(theme.Input, theme.InputBg)
-	ColDisabled = pair(theme.Disabled, theme.ListBg)
+	ColGhost = pair(theme.Ghost, theme.InputBg)
+	ColDisabled = pair(theme.Disabled, theme.InputBg)
 	ColMatch = pair(theme.Match, theme.ListBg)
 	ColSelectedMatch = pair(theme.SelectedMatch, theme.SelectedBg)
 	ColCursor = pair(theme.Cursor, theme.Gutter)

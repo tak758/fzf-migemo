@@ -18,6 +18,7 @@ import (
 	"sync/atomic"
 	"syscall"
 	"time"
+	"unicode"
 
 	"github.com/rivo/uniseg"
 
@@ -1235,9 +1236,14 @@ func (t *Terminal) ansiLabelPrinter(str string, color *tui.ColorPair, fill bool)
 			return nil, 0
 		}
 		printFn := func(window tui.Window, limit int) {
-			if length > limit {
-				trimmedRunes, _ := t.trimRight(runes, limit)
-				window.CPrint(*color, string(trimmedRunes))
+			ellipsis := []rune{}
+			ellipsisWidth := 0
+			if !fill {
+				ellipsis, ellipsisWidth = util.Truncate(t.ellipsis, limit)
+			}
+			if length > limit-ellipsisWidth {
+				trimmedRunes, _ := t.trimRight(runes, limit-ellipsisWidth)
+				window.CPrint(*color, string(trimmedRunes)+string(ellipsis))
 			} else if fill {
 				window.CPrint(*color, util.RepeatToFill(text, length, limit))
 			} else {
@@ -1258,7 +1264,7 @@ func (t *Terminal) ansiLabelPrinter(str string, color *tui.ColorPair, fill bool)
 	printFn := func(window tui.Window, limit int) {
 		if offsets == nil {
 			// tui.Col* are not initialized until renderer.Init()
-			offsets = result.colorOffsets(nil, nil, t.theme, *color, *color, t.nthAttr, false)
+			offsets = result.colorOffsets(nil, nil, t.theme, *color, *color, t.nthAttr)
 		}
 		for limit > 0 {
 			if length > limit {
@@ -2381,7 +2387,7 @@ func (t *Terminal) printPrompt() {
 
 	before, after := t.updatePromptOffset()
 	if len(before) == 0 && len(after) == 0 && len(t.ghost) > 0 {
-		w.CPrint(tui.ColInput.WithAttr(tui.Dim), t.ghost)
+		w.CPrint(tui.ColGhost, t.ghost)
 		return
 	}
 
@@ -2791,17 +2797,28 @@ func (t *Terminal) printItem(result Result, line int, maxLine int, index int, cu
 	_, selected := t.selected[item.Index()]
 	label := ""
 	extraWidth := 0
+	alt := false
+	altBg := t.theme.AltBg
+	selectedBg := selected && t.theme.SelectedBg != t.theme.ListBg
 	if t.jumping != jumpDisabled {
 		if index < len(t.jumpLabels) {
 			// Striped
-			current = index%2 == 0
+			if !altBg.IsColorDefined() {
+				altBg = t.theme.DarkBg
+				alt = index%2 == 0
+			} else {
+				alt = index%2 == 1
+			}
 			label = t.jumpLabels[index:index+1] + strings.Repeat(" ", util.Max(0, t.pointerLen-1))
 			if t.pointerLen == 0 {
 				extraWidth = 1
 			}
 		}
-	} else if current {
-		label = t.pointer
+	} else {
+		if current {
+			label = t.pointer
+		}
+		alt = !selectedBg && altBg.IsColorDefined() && index%2 == 1
 	}
 
 	// Avoid unnecessary redraw
@@ -2828,10 +2845,12 @@ func (t *Terminal) printItem(result Result, line int, maxLine int, index int, cu
 	maxWidth := t.window.Width() - (t.pointerLen + t.markerLen + 1)
 	postTask := func(lineNum int, width int, wrapped bool, forceRedraw bool) {
 		width += extraWidth
-		if (current || selected) && t.highlightLine {
+		if (current || selected || alt) && t.highlightLine {
 			color := tui.ColSelected
 			if current {
 				color = tui.ColCurrent
+			} else if alt {
+				color = color.WithBg(altBg)
 			}
 			fillSpaces := maxWidth - width
 			if wrapped {
@@ -2929,6 +2948,10 @@ func (t *Terminal) printItem(result Result, line int, maxLine int, index int, cu
 			base = tui.ColNormal
 			match = tui.ColMatch
 		}
+		if alt {
+			base = base.WithBg(altBg)
+			match = match.WithBg(altBg)
+		}
 		finalLineNum = t.printHighlighted(result, base, match, false, true, line, maxLine, forceRedraw, preTask, postTask)
 	}
 	for i := 0; i < t.gap && finalLineNum < maxLine; i++ {
@@ -3021,13 +3044,14 @@ func (t *Terminal) printHighlighted(result Result, colBase tui.ColorPair, colMat
 			}
 			for _, token := range tokens {
 				start := token.prefixLength
-				end := start + int32(token.text.Length())
+				length := token.text.Length() - token.text.TrailingWhitespaces()
+				end := start + int32(length)
 				nthOffsets = append(nthOffsets, Offset{int32(start), int32(end)})
 			}
 			sort.Sort(ByOrder(nthOffsets))
 		}
 	}
-	allOffsets := result.colorOffsets(charOffsets, nthOffsets, t.theme, colBase, colMatch, t.nthAttr, current)
+	allOffsets := result.colorOffsets(charOffsets, nthOffsets, t.theme, colBase, colMatch, t.nthAttr)
 
 	maxLines := 1
 	if t.canSpanMultiLines() {
@@ -3535,10 +3559,15 @@ Loop:
 				str, width := t.processTabs(trimmed, prefixWidth)
 				if width > prefixWidth {
 					prefixWidth = width
-					if t.theme.Colored && ansi != nil && ansi.colored() {
+					colored := ansi != nil && ansi.colored()
+					if t.theme.Colored && colored {
 						fillRet = t.pwindow.CFill(ansi.fg, ansi.bg, ansi.attr, str)
 					} else {
-						fillRet = t.pwindow.CFill(tui.ColPreview.Fg(), tui.ColPreview.Bg(), tui.AttrRegular, str)
+						attr := tui.AttrRegular
+						if colored {
+							attr = ansi.attr
+						}
+						fillRet = t.pwindow.CFill(tui.ColPreview.Fg(), tui.ColPreview.Bg(), attr, str)
 					}
 				}
 				return !isTrimmed &&
@@ -4278,43 +4307,61 @@ func (t *Terminal) addClickHeaderWord(env []string) []string {
 	 *   HL2     4    H1      4    H1      4
 	 *           5    H2      5    H2      5
 	 */
-	lineNum := t.clickHeaderLine - 1
-	if lineNum < 0 {
+	clickHeaderLine := t.clickHeaderLine - 1
+	if clickHeaderLine < 0 {
 		// Never clicked on the header
 		return env
 	}
 
 	// NOTE: t.header is padded with empty strings so that its size is equal to t.headerLines
-	var line string
+	nthBase := 0
 	headers := [2][]string{t.header, t.header0}
 	if t.layout == layoutReverse {
 		headers[0], headers[1] = headers[1], headers[0]
 	}
-	if lineNum < len(headers[0]) {
-		index := lineNum
-		if t.layout == layoutDefault {
-			index = len(headers[0]) - index - 1
+	var words []Token
+	var lineNum int
+	for lineNum = 0; lineNum <= clickHeaderLine; lineNum++ {
+		currentLine := lineNum == clickHeaderLine
+		var line string
+		if lineNum < len(headers[0]) {
+			index := lineNum
+			if t.layout == layoutDefault {
+				index = len(headers[0]) - index - 1
+			}
+			line = headers[0][index]
+		} else if lineNum-len(headers[0]) < len(headers[1]) {
+			line = headers[1][lineNum-len(headers[0])]
 		}
-		line = headers[0][index]
-	} else if lineNum-len(headers[0]) < len(headers[1]) {
-		line = headers[1][lineNum-len(headers[0])]
-	}
-	if len(line) == 0 {
-		return env
+		if currentLine && len(line) == 0 {
+			return env
+		}
+
+		words = Tokenize(line, t.delimiter)
+		if currentLine {
+			break
+		} else {
+			// TODO: Counting can be incorrect when the delimiter contains new line
+			// characters, and there are empty lines in the header.
+			nthBase += len(words)
+		}
 	}
 
 	colNum := t.clickHeaderColumn - 1
-	words := Tokenize(line, t.delimiter)
 	for idx, token := range words {
 		prefixWidth := int(token.prefixLength)
 		word := token.text.ToString()
-		trimmed := strings.TrimSpace(word)
+		trimmed := strings.TrimRightFunc(word, unicode.IsSpace)
 		trimWidth, _ := util.RunesWidth([]rune(trimmed), prefixWidth, t.tabstop, math.MaxInt32)
 
-		if colNum >= prefixWidth && colNum < prefixWidth+trimWidth {
+		// Find the position of the first non-space character in the word
+		minPos := strings.IndexFunc(trimmed, func(r rune) bool {
+			return !unicode.IsSpace(r)
+		})
+		if colNum >= minPos && colNum >= prefixWidth && colNum < prefixWidth+trimWidth {
 			env = append(env, fmt.Sprintf("FZF_CLICK_HEADER_WORD=%s", trimmed))
-			nth := fmt.Sprintf("FZF_CLICK_HEADER_NTH=%d", idx+1)
-			if idx == len(words)-1 {
+			nth := fmt.Sprintf("FZF_CLICK_HEADER_NTH=%d", nthBase+idx+1)
+			if lineNum == len(t.header)+len(t.header0)-1 && idx == len(words)-1 {
 				nth += ".."
 			}
 			env = append(env, nth)
