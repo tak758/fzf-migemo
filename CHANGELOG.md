@@ -1,6 +1,94 @@
 CHANGELOG
 =========
 
+0.64.0
+------
+- Added `multi` event that is triggered when the multi-selection has changed.
+  ```sh
+  fzf --multi \
+      --bind 'ctrl-a:select-all,ctrl-d:deselect-all' \
+      --bind 'multi:transform-footer:(( FZF_SELECT_COUNT )) && echo "Selected $FZF_SELECT_COUNT item(s)"'
+  ```
+- [Halfwidth and fullwidth alphanumeric and punctuation characters](https://en.wikipedia.org/wiki/Halfwidth_and_Fullwidth_Forms_(Unicode_block)) are now internally normalized to their ASCII equivalents to allow matching with ASCII queries.
+  ```sh
+  echo ＡＢＣ| fzf -q abc
+  ```
+- Renamed `clear-selection` action to `clear-multi` for consistency.
+    - `clear-selection` remains supported as an alias for backward compatibility.
+- Bug fixes
+    - Fixed a bug that could cause fzf to abort due to incorrect update ordering.
+    - Fixed a bug where some multi-selections were lost when using `exclude` or `change-nth`.
+
+0.63.0
+------
+_Release highlights: https://junegunn.github.io/fzf/releases/0.63.0/_
+
+- Added footer. The default border style for footer is `line`, which draws a single separator line.
+  ```sh
+  fzf --reverse --footer "fzf: friend zone forever"
+  ```
+  - Options
+      - `--footer[=STRING]`
+      - `--footer-border[=STYLE]`
+      - `--footer-label=LABEL`
+      - `--footer-label-pos=COL[:bottom]`
+  - Colors
+      - `footer`
+      - `footer-bg`
+      - `footer-border`
+      - `footer-label`
+  - Actions
+      - `change-footer`
+      - `transform-footer`
+      - `bg-transform-footer`
+      - `change-footer-label`
+      - `transform-footer-label`
+      - `bg-transform-footer-label`
+- `line` border style is now allowed for all types of border except for `--list-border`.
+  ```sh
+  fzf --height 50% --style full:line --preview 'cat {}' \
+      --bind 'focus:bg-transform-header(file {})+bg-transform-footer(wc {})'
+  ```
+- Added `{*}` placeholder flag that evaluates to all matched items.
+  ```bash
+  seq 10000 | fzf --preview "awk '{sum += \$1} END {print sum}' {*f}"
+  ```
+  - Use this with caution, as it can make fzf sluggish for large lists.
+- Added asynchronous transform actions with `bg-` prefix that run asynchronously in the background, along with `bg-cancel` action to cancel currently running `bg-transform` actions.
+  ```sh
+  # Implement popup that disappears after 1 second
+  #   * Use footer as the popup
+  #   * Use `bell` to ring the terminal bell
+  #   * Use `bg-transform-footer` to clear the footer after 1 second
+  #   * Use `bg-cancel` to cancel currently running background transform actions
+  fzf --multi --list-border \
+      --bind 'enter:execute-silent(echo -n {+} | pbcopy)+bell' \
+      --bind 'enter:+transform-footer(echo Copied {} to clipboard)' \
+      --bind 'enter:+bg-cancel+bg-transform-footer(sleep 1)'
+
+  # It's okay for the commands to take a little while because they run in the background
+  GETTER='curl -s http://metaphorpsum.com/sentences/1'
+  fzf --style full --border --preview : \
+      --bind "focus:bg-transform-header:$GETTER" \
+      --bind "focus:+bg-transform-footer:$GETTER" \
+      --bind "focus:+bg-transform-border-label:$GETTER" \
+      --bind "focus:+bg-transform-preview-label:$GETTER" \
+      --bind "focus:+bg-transform-input-label:$GETTER" \
+      --bind "focus:+bg-transform-list-label:$GETTER" \
+      --bind "focus:+bg-transform-header-label:$GETTER" \
+      --bind "focus:+bg-transform-footer-label:$GETTER" \
+      --bind "focus:+bg-transform-ghost:$GETTER" \
+      --bind "focus:+bg-transform-prompt:$GETTER"
+  ```
+- Added support for full-line background color in the list section
+  ```sh
+  for i in $(seq 16 255); do
+    echo -e "\x1b[48;5;${i}m\x1b[0Khello"
+  done | fzf --ansi
+  ```
+- SSH completion enhancements by @akinomyoga
+- Bug fixes and improvements
+
 0.62.0
 ------
 - Relaxed the `--color` option syntax to allow whitespace-separated entries (in addition to commas), making multi-line definitions easier to write and read

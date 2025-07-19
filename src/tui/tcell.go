@@ -103,6 +103,7 @@ const (
 	AttrRegular   = Attr(1 << 7)
 	AttrClear     = Attr(1 << 8)
 	BoldForce     = Attr(1 << 10)
+	FullBg        = Attr(1 << 11)
 )
 
 func (r *FullscreenRenderer) Bell() {
@@ -161,10 +162,10 @@ func (c Color) Style() tcell.Color {
 func (a Attr) Merge(b Attr) Attr {
 	if b&AttrRegular > 0 {
 		// Only keep bold attribute set by the system
-		return b | (a & BoldForce)
+		return (b &^ AttrRegular) | (a & BoldForce)
 	}
 
-	return a | b
+	return (a &^ AttrRegular) | b
 }
 
 // handle the following as private members of FullscreenRenderer instance
@@ -600,6 +601,8 @@ func (r *FullscreenRenderer) NewWindow(top int, left int, width int, height int,
 		normal = ColNormal
 	case WindowHeader:
 		normal = ColHeader
+	case WindowFooter:
+		normal = ColFooter
 	case WindowInput:
 		normal = ColInput
 	case WindowPreview:
@@ -865,6 +868,8 @@ func (w *TcellWindow) drawBorder(onlyHorizontal bool) {
 			style = ColListBorder.style()
 		case WindowHeader:
 			style = ColHeaderBorder.style()
+		case WindowFooter:
+			style = ColFooterBorder.style()
 		case WindowInput:
 			style = ColInputBorder.style()
 		case WindowPreview:
