@@ -36,7 +36,7 @@ jobs:
         mkdir tmp
         for i in fzf*
         do
-        zip -ry tmp/"$i" "$i"
+        zip -ry tmp/"$i".zip "$i"
         done
         cd ..
 
