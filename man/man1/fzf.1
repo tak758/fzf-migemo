@@ -21,7 +21,7 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 ..
-.TH fzf 1 "Aug 2025" "fzf 0.65.1" "fzf - a command-line fuzzy finder"
+.TH fzf 1 "Nov 2025" "fzf 0.67.0" "fzf - a command-line fuzzy finder"
 
 .SH NAME
 fzf - a command-line fuzzy finder
@@ -246,11 +246,11 @@ color mappings. Each entry is separated by a comma and/or whitespaces.
 
 .RS
 .B BASE SCHEME:
-    (default: \fBdark\fR on 256-color terminal, otherwise \fB16\fR; If \fBNO_COLOR\fR is set, \fBbw\fR)
+    (default: \fBdark\fR on 256-color terminal, otherwise \fBbase16\fR; If \fBNO_COLOR\fR is set, \fBbw\fR)
 
-    \fBdark    \fRColor scheme for dark 256-color terminal
-    \fBlight   \fRColor scheme for light 256-color terminal
-    \fB16      \fRColor scheme for 16-color terminal
+    \fBdark    \fRColor scheme for dark terminal
+    \fBlight   \fRColor scheme for light terminal
+    \fBbase16  \fRColor scheme using base 16 colors (alias: \fB16\fR)
     \fBbw      \fRNo colors (equivalent to \fB\-\-no\-color\fR)
 
 .B COLOR NAMES:
@@ -272,6 +272,7 @@ color mappings. Each entry is separated by a comma and/or whitespaces.
       \fBgutter              \fRGutter on the left
     \fBcurrent\-hl (hl+)      \fRHighlighted substrings (current line)
     \fBalt\-bg                \fRAlternate background color to create striped lines
+    \fBalt\-gutter            \fRAlternate gutter color to create the striped pattern
     \fBquery (input\-fg)      \fRQuery string
       \fBghost               \fRGhost text (\fB\-\-ghost\fR, \fBdim\fR applied by default)
       \fBdisabled            \fRQuery string when search is disabled (\fB\-\-disabled\fR)
@@ -299,6 +300,7 @@ color mappings. Each entry is separated by a comma and/or whitespaces.
     \fBheader (header\-fg)   \fRHeader
     \fBfooter (footer\-fg)   \fRFooter
     \fBnth                   \fRParts of the line specified by \fB\-\-nth\fR (only supports attributes)
+    \fBnomatch               \fRNon-matching items in raw mode (default: \fBdim\fR)
 
 .B ANSI COLORS:
     \fB\-1         \fRDefault terminal foreground/background color
@@ -324,7 +326,8 @@ color mappings. Each entry is separated by a comma and/or whitespaces.
     \fB#rrggbb    \fR24-bit colors
 
 .B ANSI ATTRIBUTES: (Only applies to foreground colors)
-    \fBregular    \fRClears previously set attributes; should precede the other ones
+    \fBregular        \fRClear previously set attributes; should precede the other ones
+    \fBstrip          \fRRemove colors
     \fBbold\fR
     \fBunderline\fR
     \fBreverse\fR
@@ -596,6 +599,9 @@ Indicator for wrapped lines. The default is '↳ ' or '> ' depending on
 .B "\-\-no\-multi\-line"
 Disable multi-line display of items when using \fB\-\-read0\fR
 .TP
+.B "\-\-raw"
+Enable raw mode where non-matching items are also displayed in a dimmed color.
+.TP
 .B "\-\-track"
 Make fzf track the current selection when the result list is updated.
 This can be useful when browsing logs using fzf with sorting disabled. It is
@@ -624,9 +630,16 @@ Render empty lines between each item
 The given string will be repeated to draw a horizontal line on each gap
 (default: '┈' or '\-' depending on \fB\-\-no\-unicode\fR).
 .TP
+.BI "\-\-freeze\-left=" "N"
+Number of fields to freeze on the left.
+.TP
+.BI "\-\-freeze\-right=" "N"
+Number of fields to freeze on the right.
+.TP
 .B "\-\-keep\-right"
 Keep the right end of the line visible when it's too long. Effective only when
-the query string is empty.
+the query string is empty. Use \fB\-\-freeze\-right=1\fR instead if you want
+the last field to be always visible even with a non-empty query.
 .TP
 .BI "\-\-scroll\-off=" "LINES"
 Number of screen lines to keep above or below when scrolling to the top or to
@@ -642,6 +655,12 @@ on the center of the screen.
 .TP
 .BI "\-\-jump\-labels=" "CHARS"
 Label characters for \fBjump\fR mode.
+.TP
+.BI "\-\-gutter=" "CHAR"
+Character used for the gutter column (default: '▌' unless \fB\-\-no\-unicode\fR is given)
+.TP
+.BI "\-\-gutter\-raw=" "CHAR"
+Character used for the gutter column in raw mode (default: '▖' unless \fB\-\-no\-unicode\fR is given)
 .TP
 .BI "\-\-pointer=" "STR"
 Pointer to the current line (default: '▌' or '>' depending on \fB\-\-no\-unicode\fR)
@@ -722,7 +741,7 @@ ENVIRONMENT VARIABLES EXPORTED TO CHILD PROCESSES.
 
 e.g.
      \fB# Prepend the current cursor position in yellow
-     fzf \-\-info\-command='echo \-e "\\x1b[33;1m$FZF_POS\\x1b[m/$FZF_INFO 💛"'\fR
+     fzf \-\-info\-command='printf "\\x1b[33;1m$FZF_POS\\x1b[m/$FZF_INFO 💛"'\fR
 
 .TP
 .B "\-\-no\-info"
@@ -821,6 +840,9 @@ e.g.
      \fB# See the sum of all the matched numbers
      # This won't work properly without 'f' flag due to ARG_MAX limit.
      seq 100000 | fzf \-\-preview "awk '{sum+=\\$1} END {print sum}' {*f}"\fR
+
+     \fB# Use {+f} to get the selected items as a line-separated list
+     seq 100 | fzf \-\-multi \-\-bind 'enter:become:cat {+f}'\fR
 
 Also,
 
@@ -1125,19 +1147,25 @@ On Windows, the default value is \fBcmd /s/c\fR when \fB$SHELL\fR is not
 set.
 
 .TP
-.B "\-\-listen[=[ADDR:]PORT]" "\-\-listen\-unsafe[=[ADDR:]PORT]"
-Start HTTP server and listen on the given address. It allows external processes
-to send actions to perform via POST method.
+.B "\-\-listen[=SOCKET_PATH|[ADDR:]PORT]" "\-\-listen\-unsafe[=[ADDR:]PORT]"
+Start HTTP server and listen on the given address or Unix socket. It allows
+external processes to send actions to perform via POST method and query the
+program state via GET method. For the argument to be recognized as a socket
+path, it must have \fB.sock\fR extension.
 
 - If the port number is omitted or given as 0, fzf will automatically choose
-a port and export it as \fBFZF_PORT\fR environment variable to the child processes
+a port and export it as \fBFZF_PORT\fR environment variable to the child processes.
+
+- If a Unix socket path is given, fzf will create a Unix domain socket at the
+  given path. The existing file will be removed. The path to the socket file
+  is exported as \fBFZF_SOCK\fR environment variable.
 
 - If \fBFZF_API_KEY\fR environment variable is set, the server would require
-sending an API key with the same value in the \fBx\-api\-key\fR HTTP header
+  sending an API key with the same value in the \fBx\-api\-key\fR HTTP header.
 
-- \fBFZF_API_KEY\fR is required for a non-localhost listen address
+- \fBFZF_API_KEY\fR is required for a non-localhost listen address.
 
-- To allow remote process execution, use \fB\-\-listen\-unsafe\fR
+- To allow remote process execution, use \fB\-\-listen\-unsafe\fR.
 
 e.g.
      \fB# Start HTTP server on port 6266
@@ -1175,6 +1203,18 @@ e.g.
        echo +first
      '
      \fR
+
+Here is an example script that uses a Unix socket instead of a TCP port.
+
+    \fB
+    fzf --listen=/tmp/fzf.sock
+
+    # GET
+    curl --unix-socket /tmp/fzf.sock http
+
+    # POST
+    curl --unix-socket /tmp/fzf.sock http -d up
+    \fR
 
 .SS DIRECTORY TRAVERSAL
 .TP
@@ -1327,6 +1367,8 @@ fzf exports the following environment variables to its child processes.
 .br
 .BR FZF_COLUMNS "         Number of columns fzf takes up excluding padding and margin"
 .br
+.BR FZF_DIRECTION "       Direction of the list (\fBup\fR or \fBdown\fR)"
+.br
 .BR FZF_TOTAL_COUNT "     Total number of items"
 .br
 .BR FZF_MATCH_COUNT "     Number of matched items"
@@ -1363,6 +1405,8 @@ fzf exports the following environment variables to its child processes.
 .br
 .BR FZF_PORT "            Port number when \-\-listen option is used"
 .br
+.BR FZF_SOCK "            Unix socket path when \-\-listen option is used"
+.br
 .BR FZF_PREVIEW_TOP "     Top position of the preview window"
 .br
 .BR FZF_PREVIEW_LEFT "    Left position of the preview window"
@@ -1370,6 +1414,8 @@ fzf exports the following environment variables to its child processes.
 .BR FZF_PREVIEW_LINES "   Number of lines in the preview window"
 .br
 .BR FZF_PREVIEW_COLUMNS " Number of columns in the preview window"
+.br
+.BR FZF_RAW "             Only in raw mode. 1 if the current item matches, 0 otherwise"
 
 .SH EXTENDED SEARCH MODE
 
@@ -1453,7 +1499,7 @@ e.g.
 .br
 \fIctrl\-/\fR         (\fIctrl\-_\fR)
 .br
-\fIctrl\-alt\-[a\-z]\fR
+\fIctrl\-alt\-[a\-z]\fR (\fIctrl\-alt\-h\fR is \fIctrl\-alt\-backspace\fR on non-Windows)
 .br
 \fIalt\-[*]\fR        (Any case-sensitive single character is allowed)
 .br
@@ -1473,11 +1519,21 @@ e.g.
 .br
 \fIalt\-right\fR
 .br
+\fIalt\-home\fR
+.br
+\fIalt\-end\fR
+.br
+\fIalt\-backspace\fR  (\fIalt\-bspace\fR \fIalt\-bs\fR)
+.br
+\fIalt\-delete\fR
+.br
+\fIalt\-page\-up\fR
+.br
+\fIalt\-page\-down\fR
+.br
 \fIalt\-enter\fR
 .br
 \fIalt\-space\fR
-.br
-\fIalt\-backspace\fR  (\fIalt\-bspace\fR \fIalt\-bs\fR)
 .br
 \fItab\fR
 .br
@@ -1505,6 +1561,26 @@ e.g.
 .br
 \fIpage\-down\fR      (\fIpgdn\fR)
 .br
+\fIctrl\-up\fR
+.br
+\fIctrl\-down\fR
+.br
+\fIctrl\-left\fR
+.br
+\fIctrl\-right\fR
+.br
+\fIctrl\-home\fR
+.br
+\fIctrl\-end\fR
+.br
+\fIctrl\-backspace\fR  (\fIctrl\-bspace\fR \fIctrl\-bs\fR)
+.br
+\fIctrl\-delete\fR
+.br
+\fIctrl\-page\-up\fR
+.br
+\fIctrl\-page\-down\fR
+.br
 \fIshift\-up\fR
 .br
 \fIshift\-down\fR
@@ -1513,7 +1589,15 @@ e.g.
 .br
 \fIshift\-right\fR
 .br
+\fIshift\-home\fR
+.br
+\fIshift\-end\fR
+.br
 \fIshift\-delete\fR
+.br
+\fIshift\-page\-up\fR
+.br
+\fIshift\-page\-down\fR
 .br
 \fIalt\-shift\-up\fR
 .br
@@ -1522,6 +1606,72 @@ e.g.
 \fIalt\-shift\-left\fR
 .br
 \fIalt\-shift\-right\fR
+.br
+\fIalt\-shift\-home\fR
+.br
+\fIalt\-shift\-end\fR
+.br
+\fIalt\-shift\-delete\fR
+.br
+\fIalt\-shift\-page\-up\fR
+.br
+\fIalt\-shift\-page\-down\fR
+.br
+\fIctrl\-alt\-up\fR
+.br
+\fIctrl\-alt\-down\fR
+.br
+\fIctrl\-alt\-left\fR
+.br
+\fIctrl\-alt\-right\fR
+.br
+\fIctrl\-alt\-home\fR
+.br
+\fIctrl\-alt\-end\fR
+.br
+\fIctrl\-alt\-backspace\fR  (\fIctrl\-alt\-bspace\fR \fIctrl\-alt\-bs\fR) (\fIctrl\-alt\-h\fR (non-Windows))
+.br
+\fIctrl\-alt\-delete\fR
+.br
+\fIctrl\-alt\-page\-up\fR
+.br
+\fIctrl\-alt\-page\-down\fR
+.br
+\fIctrl\-shift\-up\fR
+.br
+\fIctrl\-shift\-down\fR
+.br
+\fIctrl\-shift\-left\fR
+.br
+\fIctrl\-shift\-right\fR
+.br
+\fIctrl\-shift\-home\fR
+.br
+\fIctrl\-shift\-end\fR
+.br
+\fIctrl\-shift\-delete\fR
+.br
+\fIctrl\-shift\-page\-up\fR
+.br
+\fIctrl\-shift\-page\-down\fR
+.br
+\fIctrl\-alt\-shift\-up\fR
+.br
+\fIctrl\-alt\-shift\-down\fR
+.br
+\fIctrl\-alt\-shift\-left\fR
+.br
+\fIctrl\-alt\-shift\-right\fR
+.br
+\fIctrl\-alt\-shift\-home\fR
+.br
+\fIctrl\-alt\-shift\-end\fR
+.br
+\fIctrl\-alt\-shift\-delete\fR
+.br
+\fIctrl\-alt\-shift\-page\-up\fR
+.br
+\fIctrl\-alt\-shift\-page\-down\fR
 .br
 \fIleft\-click\fR
 .br
@@ -1546,6 +1696,8 @@ e.g.
 \fIshift\-scroll\-down\fR
 .br
 or any single character
+
+Note that some terminal emulators may not support \fIctrl-*\fR bindings.
 
 .SS AVAILABLE EVENTS:
 \fIstart\fR
@@ -1699,13 +1851,16 @@ A key or an event can be bound to one or more of the following actions.
     \fBaccept\-non\-empty\fR             (same as \fBaccept\fR except that it prevents fzf from exiting without selection)
     \fBaccept\-or\-print\-query\fR        (same as \fBaccept\fR except that it prints the query when there's no match)
     \fBbackward\-char\fR                \fIctrl\-b  left\fR
-    \fBbackward\-delete\-char\fR         \fIctrl\-h  bspace\fR
+    \fBbackward\-delete\-char\fR         \fIctrl\-h ctrl\-bspace bspace\fR
     \fBbackward\-delete\-char/eof\fR     (same as \fBbackward\-delete\-char\fR except aborts fzf if query is empty)
+    \fBbackward\-kill\-subword\fR
     \fBbackward\-kill\-word\fR           \fIalt\-bs\fR
+    \fBbackward\-subword\fR
     \fBbackward\-word\fR                \fIalt\-b   shift\-left\fR
     \fBbecome(...)\fR                  (replace fzf process with the specified command; see below for the details)
     \fBbeginning\-of\-line\fR            \fIctrl\-a  home\fR
     \fBbell\fR                         (ring the terminal bell)
+    \fBbest\fR                         (move to the best match; same as \fBfirst\fR if raw mode is disabled)
     \fBbg\-cancel\fR                    (cancel background transform processes)
     \fBcancel\fR                       (clear query string if not empty, abort fzf otherwise)
     \fBchange\-border\-label(...)\fR     (change \fB\-\-border\-label\fR to the given string)
@@ -1730,9 +1885,13 @@ A key or an event can be bound to one or more of the following actions.
     \fBdelete\-char\fR                  \fIdel\fR
     \fBdelete\-char/eof\fR              \fIctrl\-d\fR (same as \fBdelete\-char\fR except aborts fzf if query is empty)
     \fBdeselect\fR
-    \fBdeselect\-all\fR                 (deselect all matches; to also clear non-matched selections, use \fBclear\-multi\fR)
+    \fBdeselect\-all\fR                 (deselect all matches; to also clear non-matching selections, use \fBclear\-multi\fR)
+    \fBdisable\-raw\fR                  (disable raw mode)
     \fBdisable\-search\fR               (disable search functionality)
-    \fBdown\fR                         \fIctrl\-j  ctrl\-n  down\fR
+    \fBdown\fR                         \fIctrl\-j  down\fR
+    \fBdown\-match\fR                   \fIctrl\-n\fR  \fIalt\-down\fR (move to the match below the cursor)
+    \fBdown\-selected\fR                (move to the selected item below the cursor)
+    \fBenable\-raw\fR                   (enable raw mode)
     \fBenable\-search\fR                (enable search functionality)
     \fBend\-of\-line\fR                  \fIctrl\-e  end\fR
     \fBexclude\fR                      (exclude the current item from the result)
@@ -1741,14 +1900,16 @@ A key or an event can be bound to one or more of the following actions.
     \fBexecute\-silent(...)\fR          (see below for the details)
     \fBfirst\fR                        (move to the first match; same as \fBpos(1)\fR)
     \fBforward\-char\fR                 \fIctrl\-f  right\fR
+    \fBforward\-subword\fR
     \fBforward\-word\fR                 \fIalt\-f   shift\-right\fR
     \fBignore\fR
     \fBjump\fR                         (EasyMotion-like 2-keystroke movement)
     \fBkill\-line\fR
+    \fBkill\-subword\fR
     \fBkill\-word\fR                    \fIalt\-d\fR
     \fBlast\fR                         (move to the last match; same as \fBpos(\-1)\fR)
     \fBnext\-history\fR                 (\fIctrl\-n\fR on \fB\-\-history\fR)
-    \fBnext\-selected\fR                (move to the next selected item)
+    \fBnext\-selected\fR                (synonym to \fBdown\-selected\fR)
     \fBpage\-down\fR                    \fIpgdn\fR
     \fBpage\-up\fR                      \fIpgup\fR
     \fBhalf\-page\-down\fR
@@ -1761,7 +1922,7 @@ A key or an event can be bound to one or more of the following actions.
     \fBoffset\-middle\fR                (place the current item is in the middle of the screen)
     \fBpos(...)\fR                     (move cursor to the numeric position; negative number to count from the end)
     \fBprev\-history\fR                 (\fIctrl\-p\fR on \fB\-\-history\fR)
-    \fBprev\-selected\fR                (move to the previous selected item)
+    \fBprev\-selected\fR                (synonym to \fBup\-selected\fR)
     \fBpreview(...)\fR                 (see below for the details)
     \fBpreview\-down\fR                 \fIshift\-down\fR
     \fBpreview\-up\fR                   \fIshift\-up\fR
@@ -1796,6 +1957,7 @@ A key or an event can be bound to one or more of the following actions.
     \fBtoggle\-multi\-line\fR
     \fBtoggle\-preview\fR
     \fBtoggle\-preview\-wrap\fR
+    \fBtoggle\-raw\fR                   (toggle raw mode for displaying non-matching items)
     \fBtoggle\-search\fR                (toggle search functionality)
     \fBtoggle\-sort\fR
     \fBtoggle\-track\fR                 (toggle global tracking option (\fB\-\-track\fR))
@@ -1822,7 +1984,9 @@ A key or an event can be bound to one or more of the following actions.
     \fBunix\-line\-discard\fR            \fIctrl\-u\fR
     \fBunix\-word\-rubout\fR             \fIctrl\-w\fR
     \fBuntrack\-current\fR              (stop tracking the current item; no-op if global tracking is enabled)
-    \fBup\fR                           \fIctrl\-k  ctrl\-p  up\fR
+    \fBup\fR                           \fIctrl\-k  up\fR
+    \fBup\-match\fR                     \fIctrl\-p\fR  \fIalt\-up\fR (move to the match above the cursor)
+    \fBup\-selected\fR                  (move to the selected item above the cursor)
     \fByank\fR                         \fIctrl\-y\fR
 
 Each \fBtransform*\fR action has a corresponding \fBbg\-transform*\fR
@@ -1945,7 +2109,7 @@ payload of HTTP POST request to the \fB\-\-listen\fR server.
 
 e.g.
     \fB# Disallow selecting an empty line
-    echo \-e "1. Hello\\n2. Goodbye\\n\\n3. Exit" |
+    printf "1. Hello\\n2. Goodbye\\n\\n3. Exit" |
       fzf \-\-height '~100%' \-\-reverse \-\-header 'Select one' \\
           \-\-bind 'enter:transform:[[ \-n {} ]] &&
                     echo accept ||

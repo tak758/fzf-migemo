@@ -7,6 +7,7 @@
 # - $FZF_TMUX_OPTS
 # - $FZF_CTRL_T_COMMAND
 # - $FZF_CTRL_T_OPTS
+# - $FZF_CTRL_R_COMMAND
 # - $FZF_CTRL_R_OPTS
 # - $FZF_ALT_C_COMMAND
 # - $FZF_ALT_C_OPTS
@@ -40,7 +41,7 @@ if [[ -o interactive ]]; then
 
 #----BEGIN INCLUDE common.sh
 # NOTE: Do not directly edit this section, which is copied from "common.sh".
-# To modify it, one can edit "common.sh" and run "./update-common.sh" to apply
+# To modify it, one can edit "common.sh" and run "./update.sh" to apply
 # the changes. See code comments in "common.sh" for the implementation details.
 
 __fzf_defaults() {
@@ -54,10 +55,13 @@ __fzf_exec_awk() {
     __fzf_awk=awk
     if [[ $OSTYPE == solaris* && -x /usr/xpg4/bin/awk ]]; then
       __fzf_awk=/usr/xpg4/bin/awk
-    elif command -v mawk >/dev/null 2>&1; then
+    elif command -v mawk > /dev/null 2>&1; then
       local n x y z d
       IFS=' .' read -r n x y z d <<< $(command mawk -W version 2> /dev/null)
-      [[ $n == mawk ]] && (( d >= 20230302 && (x * 1000 + y) * 1000 + z >= 1003004 )) && __fzf_awk=mawk
+      [[ $n == mawk ]] &&
+        (((x * 1000 + y) * 1000 + z >= 1003004)) 2> /dev/null &&
+        ((d >= 20230302)) 2> /dev/null &&
+        __fzf_awk=mawk
     fi
   fi
   LC_ALL=C exec "$__fzf_awk" "$@"
@@ -124,25 +128,52 @@ fi
 
 # CTRL-R - Paste the selected command from history into the command line
 fzf-history-widget() {
-  local selected
-  setopt localoptions noglobsubst noposixbuiltins pipefail no_aliases noglob nobash_rematch 2> /dev/null
+  local selected extracted_with_perl=0
+  setopt localoptions noglobsubst noposixbuiltins pipefail no_aliases no_glob no_ksharrays extendedglob 2> /dev/null
   # Ensure the module is loaded if not already, and the required features, such
   # as the associative 'history' array, which maps event numbers to full history
   # lines, are set. Also, make sure Perl is installed for multi-line output.
   if zmodload -F zsh/parameter p:{commands,history} 2>/dev/null && (( ${+commands[perl]} )); then
     selected="$(printf '%s\t%s\000' "${(kv)history[@]}" |
       perl -0 -ne 'if (!$seen{(/^\s*[0-9]+\**\t(.*)/s, $1)}++) { s/\n/\n\t/g; print; }' |
-      FZF_DEFAULT_OPTS=$(__fzf_defaults "" "-n2..,.. --scheme=history --bind=ctrl-r:toggle-sort --wrap-sign '\t↳ ' --highlight-line ${FZF_CTRL_R_OPTS-} --query=${(qqq)LBUFFER} +m --read0") \
+      FZF_DEFAULT_OPTS=$(__fzf_defaults "" "-n2..,.. --scheme=history --bind=ctrl-r:toggle-sort,alt-r:toggle-raw --wrap-sign '\t↳ ' --highlight-line --multi ${FZF_CTRL_R_OPTS-} --query=${(qqq)LBUFFER} --read0") \
       FZF_DEFAULT_OPTS_FILE='' $(__fzfcmd))"
+      extracted_with_perl=1
   else
     selected="$(fc -rl 1 | __fzf_exec_awk '{ cmd=$0; sub(/^[ \t]*[0-9]+\**[ \t]+/, "", cmd); if (!seen[cmd]++) print $0 }' |
-      FZF_DEFAULT_OPTS=$(__fzf_defaults "" "-n2..,.. --scheme=history --bind=ctrl-r:toggle-sort --wrap-sign '\t↳ ' --highlight-line ${FZF_CTRL_R_OPTS-} --query=${(qqq)LBUFFER} +m") \
+      FZF_DEFAULT_OPTS=$(__fzf_defaults "" "-n2..,.. --scheme=history --bind=ctrl-r:toggle-sort,alt-r:toggle-raw --wrap-sign '\t↳ ' --highlight-line --multi ${FZF_CTRL_R_OPTS-} --query=${(qqq)LBUFFER}") \
       FZF_DEFAULT_OPTS_FILE='' $(__fzfcmd))"
   fi
   local ret=$?
+  local -a cmds
+  # Avoid leaking auto assigned values when using backreferences '(#b)'
+  local -a mbegin mend match
   if [ -n "$selected" ]; then
-    if [[ $(__fzf_exec_awk '{print $1; exit}' <<< "$selected") =~ ^[1-9][0-9]* ]]; then
-      zle vi-fetch-history -n $MATCH
+    # Heuristic to check if the selected value is from history or a custom query
+    if ((( extracted_with_perl )) && [[ $selected == <->$'\t'* ]]) ||
+    ((( ! extracted_with_perl )) && [[ $selected == [[:blank:]]#<->(  |\* )* ]]); then
+      # Split at newlines
+      for line in ${(ps:\n:)selected}; do
+        if (( extracted_with_perl )); then
+          if [[ $line == (#b)(<->)(#B)$'\t'* ]]; then
+            (( ${+history[${match[1]}]} )) && cmds+=("${history[${match[1]}]}")
+          fi
+        elif [[ $line == [[:blank:]]#(#b)(<->)(#B)(  |\* )* ]]; then
+          # Avoid $history array: lags behind 'fc' on foreign commands (*)
+          # https://zsh.org/mla/users/2024/msg00692.html
+          # Push BUFFER onto stack; fetch and save history entry from BUFFER; restore
+          zle .push-line
+          zle vi-fetch-history -n ${match[1]}
+          (( ${#BUFFER} )) && cmds+=("${BUFFER}")
+          BUFFER=""
+          zle .get-line
+        fi
+      done
+      if (( ${#cmds[@]} )); then
+        # Join by newline after stripping trailing newlines from each command
+        BUFFER="${(pj:\n:)${(@)cmds%%$'\n'#}}"
+        CURSOR=${#BUFFER}
+      fi
     else # selected is a custom query, not from history
       LBUFFER="$selected"
     fi
@@ -150,10 +181,15 @@ fzf-history-widget() {
   zle reset-prompt
   return $ret
 }
-zle     -N            fzf-history-widget
-bindkey -M emacs '^R' fzf-history-widget
-bindkey -M vicmd '^R' fzf-history-widget
-bindkey -M viins '^R' fzf-history-widget
+if [[ ${FZF_CTRL_R_COMMAND-x} != "" ]]; then
+  if [[ -n ${FZF_CTRL_R_COMMAND-} ]]; then
+    echo "warning: FZF_CTRL_R_COMMAND is set to a custom command, but custom commands are not yet supported for CTRL-R" >&2
+  fi
+  zle     -N            fzf-history-widget
+  bindkey -M emacs '^R' fzf-history-widget
+  bindkey -M vicmd '^R' fzf-history-widget
+  bindkey -M viins '^R' fzf-history-widget
+fi
 fi
 
 } always {

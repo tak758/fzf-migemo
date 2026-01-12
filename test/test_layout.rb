@@ -178,8 +178,8 @@ class TestLayout < TestInteractive
     tmux.send_keys 'seq 3 | fzf --height ~100% --info=inline --border rounded', :Enter
     expected = <<~OUTPUT
       ╭──────────
-      │   3
-      │   2
+      │ ▌ 3
+      │ ▌ 2
       │ > 1
       │ >   < 3/3
       ╰──────────
@@ -197,8 +197,8 @@ class TestLayout < TestInteractive
       │ │
       │ │
       │ ╰────────
-      │   3
-      │   2
+      │ ▌ 3
+      │ ▌ 2
       │ > 1
       │ >   < 3/3
       ╰──────────
@@ -247,7 +247,7 @@ class TestLayout < TestInteractive
     tmux.send_keys 'seq 100 | fzf --height ~5 --info=inline --border rounded', :Enter
     expected = <<~OUTPUT
       ╭──────────────
-      │   2
+      │ ▌ 2
       │ > 1
       │ >   < 100/100
       ╰──────────────
@@ -275,12 +275,12 @@ class TestLayout < TestInteractive
   def test_fzf_multi_line
     tmux.send_keys %[(echo -en '0\\0'; echo -en '1\\n2\\0'; seq 1000) | fzf --read0 --multi --bind load:select-all --border rounded], :Enter
     block = <<~BLOCK
-      │  ┃998
-      │  ┃999
-      │  ┃1000
-      │  ╹
-      │  ╻1
-      │  ╹2
+      │ ▌┃998
+      │ ▌┃999
+      │ ▌┃1000
+      │ ▌╹
+      │ ▌╻1
+      │ ▌╹2
       │ >>0
       │   3/3 (3)
       │ >
@@ -312,11 +312,11 @@ class TestLayout < TestInteractive
       │ >
       │   3/3 (3)
       │ >>0
-      │  ╻1
-      │  ╹2
-      │  ╻1
-      │  ┃2
-      │  ┃3
+      │ ▌╻1
+      │ ▌╹2
+      │ ▌╻1
+      │ ▌┃2
+      │ ▌┃3
     BLOCK
     tmux.until { assert_block(block, it) }
   end
@@ -1154,6 +1154,74 @@ class TestLayout < TestInteractive
       >
     BLOCK
     tmux.until { assert_block(block, it) }
+  end
+
+  def test_gutter_default
+    tmux.send_keys %(seq 10 | fzf), :Enter
+    block = <<~BLOCK
+      ▌ 3
+      ▌ 2
+      > 1
+        10/10
+      >
+    BLOCK
+    tmux.until { assert_block(block, it) }
+  end
+
+  def test_gutter_default_no_unicode
+    tmux.send_keys %(seq 10 | fzf --no-unicode), :Enter
+    block = <<~BLOCK
+        3
+        2
+      > 1
+        10/10
+      >
+    BLOCK
+    tmux.until { assert_block(block, it) }
+  end
+
+  def test_gutter_custom
+    tmux.send_keys %(seq 10 | fzf --gutter x), :Enter
+    block = <<~BLOCK
+      x 3
+      x 2
+      > 1
+        10/10
+      >
+    BLOCK
+    tmux.until { assert_block(block, it) }
+  end
+
+  # https://github.com/junegunn/fzf/issues/4537
+  def test_no_scrollbar_preview_toggle
+    x = 'x' * 300
+    y = 'y' * 300
+    tmux.send_keys %(yes #{x} | head -1000 | fzf --bind 'tab:toggle-preview' --border --no-scrollbar --preview 'echo #{y}' --preview-window 'border-left'), :Enter
+
+    # │ ▌ xxxxxxxx·· │ yyyyyyyy│
+    tmux.until do |lines|
+      lines.any? { it.match?(/x·· │ y+│$/) }
+    end
+    tmux.send_keys :Tab
+
+    # │ ▌ xxxxxxxx·· │
+    tmux.until do |lines|
+      lines.none? { it.match?(/x··y│$/) }
+    end
+
+    tmux.send_keys :Tab
+    tmux.until do |lines|
+      lines.any? { it.match?(/x·· │ y+│$/) }
+    end
+  end
+
+  def test_header_and_footer_should_not_be_wider_than_list
+    tmux.send_keys %(WIDE=$(printf 'x%.0s' {1..1000}); (echo $WIDE; echo $WIDE) | fzf --header-lines 1 --style full --header-border bottom --header-lines-border top --ellipsis XX --header "$WIDE" --footer "$WIDE" --no-footer-border), :Enter
+    tmux.until do |lines|
+      matches = lines.filter_map { |line| line[/x+XX/] }
+      assert_equal 4, matches.length
+      assert_equal 1, matches.uniq.length
+    end
   end
 
   def test_combinations

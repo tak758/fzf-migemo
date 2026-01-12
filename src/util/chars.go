@@ -52,7 +52,7 @@ func ToChars(bytes []byte) Chars {
 	}
 
 	runes := make([]rune, bytesUntil, len(bytes))
-	for i := 0; i < bytesUntil; i++ {
+	for i := range bytesUntil {
 		runes[i] = rune(bytes[i])
 	}
 	for i := bytesUntil; i < len(bytes); {
@@ -187,7 +187,7 @@ func (chars *Chars) TrailingWhitespaces() int {
 func (chars *Chars) TrimTrailingWhitespaces(maxIndex int) {
 	whitespaces := chars.TrailingWhitespaces()
 	end := len(chars.slice) - whitespaces
-	chars.slice = chars.slice[0:Max(end, maxIndex)]
+	chars.slice = chars.slice[0:max(end, maxIndex)]
 }
 
 func (chars *Chars) TrimSuffix(runes []rune) {
@@ -259,7 +259,7 @@ func (chars *Chars) Lines(multiLine bool, maxLines int, wrapCols int, wrapSignWi
 		lines = append(lines, text)
 	} else {
 		from := 0
-		for off := 0; off < len(text); off++ {
+		for off := range text {
 			if text[off] == '\n' {
 				lines = append(lines, text[from:off+1]) // Include '\n'
 				from = off + 1

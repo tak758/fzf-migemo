@@ -2,6 +2,7 @@
 package fzf
 
 import (
+	"maps"
 	"os"
 	"sync"
 	"time"
@@ -35,6 +36,18 @@ func (r *revision) bumpMinor() {
 
 func (r revision) compatible(other revision) bool {
 	return r.major == other.major
+}
+
+func buildItemTransformer(opts *Options) func(*Item) string {
+	if opts.AcceptNth != nil {
+		fn := opts.AcceptNth(opts.Delimiter)
+		return func(item *Item) string {
+			return item.acceptNth(opts.Ansi, opts.Delimiter, fn)
+		}
+	}
+	return func(item *Item) string {
+		return item.AsString(opts.Ansi)
+	}
 }
 
 // Run starts fzf
@@ -146,7 +159,7 @@ func Run(opts *Options) (int, error) {
 			if item.colors != nil {
 				for _, ansi := range *item.colors {
 					if ansi.color.bg >= 0 {
-						maxColorOffset = util.Max32(maxColorOffset, ansi.offset[1])
+						maxColorOffset = max(maxColorOffset, ansi.offset[1])
 					}
 				}
 			}
@@ -225,10 +238,7 @@ func Run(opts *Options) (int, error) {
 	}
 	patternBuilder := func(runes []rune) *Pattern {
 		denyMutex.Lock()
-		denylistCopy := make(map[int32]struct{})
-		for k, v := range denylist {
-			denylistCopy[k] = v
-		}
+		denylistCopy := maps.Clone(denylist)
 		denyMutex.Unlock()
 		return BuildPattern(cache, patternCache,
 			opts.Fuzzy, opts.FuzzyAlgo, opts.Extended, opts.Case, opts.Normalize, forward, withPos,
@@ -245,6 +255,8 @@ func Run(opts *Options) (int, error) {
 		pattern := patternBuilder([]rune(*opts.Filter))
 		matcher.sort = pattern.sortable
 
+		transformer := buildItemTransformer(opts)
+
 		found := false
 		if streamingFilter {
 			slab := util.MakeSlab(slab16Size, slab32Size)
@@ -255,7 +267,7 @@ func Run(opts *Options) (int, error) {
 					if chunkList.trans(&item, runes) {
 						mutex.Lock()
 						if result, _, _ := pattern.MatchItem(&item, false, slab); result != nil {
-							opts.Printer(item.text.ToString())
+							opts.Printer(transformer(&item))
 							found = true
 						}
 						mutex.Unlock()
@@ -269,11 +281,11 @@ func Run(opts *Options) (int, error) {
 
 			// NOTE: Streaming filter is inherently not compatible with --tail
 			snapshot, _, _ := chunkList.Snapshot(opts.Tail)
-			merger, _ := matcher.scan(MatchRequest{
+			result := matcher.scan(MatchRequest{
 				chunks:  snapshot,
 				pattern: pattern})
-			for i := 0; i < merger.Length(); i++ {
-				opts.Printer(merger.Get(i).item.AsString(opts.Ansi))
+			for i := 0; i < result.merger.Length(); i++ {
+				opts.Printer(transformer(result.merger.Get(i).item))
 				found = true
 			}
 		}
@@ -321,7 +333,7 @@ func Run(opts *Options) (int, error) {
 			if total >= maxFit || final {
 				deferred = false
 				heightUnknown = false
-				terminal.startChan <- fitpad{util.Min(total, maxFit), padHeight}
+				terminal.startChan <- fitpad{min(total, maxFit), padHeight}
 			}
 		} else if deferred {
 			deferred = false
@@ -481,12 +493,13 @@ func Run(opts *Options) (int, error) {
 
 				case EvtSearchFin:
 					switch val := value.(type) {
-					case *Merger:
+					case MatchResult:
+						merger := val.merger
 						if deferred {
-							count := val.Length()
+							count := merger.Length()
 							if opts.Select1 && count > 1 || opts.Exit0 && !opts.Select1 && count > 0 {
-								determine(val.final)
-							} else if val.final {
+								determine(merger.final)
+							} else if merger.final {
 								if opts.Exit0 && count == 0 || opts.Select1 && count == 1 {
 									if opts.PrintQuery {
 										opts.Printer(opts.Query)
@@ -494,17 +507,9 @@ func Run(opts *Options) (int, error) {
 									if len(opts.Expect) > 0 {
 										opts.Printer("")
 									}
-									transformer := func(item *Item) string {
-										return item.AsString(opts.Ansi)
-									}
-									if opts.AcceptNth != nil {
-										fn := opts.AcceptNth(opts.Delimiter)
-										transformer = func(item *Item) string {
-											return item.acceptNth(opts.Ansi, opts.Delimiter, fn)
-										}
-									}
-									for i := 0; i < count; i++ {
-										opts.Printer(transformer(val.Get(i).item))
+									transformer := buildItemTransformer(opts)
+									for i := range count {
+										opts.Printer(transformer(merger.Get(i).item))
 									}
 									if count == 0 {
 										exitCode = ExitNoMatch
@@ -512,7 +517,7 @@ func Run(opts *Options) (int, error) {
 									stop = true
 									return
 								}
-								determine(val.final)
+								determine(merger.final)
 							}
 						}
 						terminal.UpdateList(val)
@@ -525,7 +530,7 @@ func Run(opts *Options) (int, error) {
 			break
 		}
 		if delay && reading {
-			dur := util.DurWithin(
+			dur := util.Constrain(
 				time.Duration(ticks-startTick)*coordinatorDelayStep,
 				0, coordinatorDelayMax)
 			time.Sleep(dur)

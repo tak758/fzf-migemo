@@ -36,8 +36,6 @@ func (p ColorPair) style() tcell.Style {
 	return style.Foreground(asTcellColor(p.Fg())).Background(asTcellColor(p.Bg()))
 }
 
-type Attr int32
-
 type TcellWindow struct {
 	color         bool
 	windowType    WindowType
@@ -98,14 +96,6 @@ const (
 	Italic             = Attr(tcell.AttrItalic)
 )
 
-const (
-	AttrUndefined = Attr(0)
-	AttrRegular   = Attr(1 << 7)
-	AttrClear     = Attr(1 << 8)
-	BoldForce     = Attr(1 << 10)
-	FullBg        = Attr(1 << 11)
-)
-
 func (r *FullscreenRenderer) Bell() {
 	_screen.Beep()
 }
@@ -157,15 +147,6 @@ func (c Color) Style() tcell.Color {
 	} else {
 		return tcell.Color(c)
 	}
-}
-
-func (a Attr) Merge(b Attr) Attr {
-	if b&AttrRegular > 0 {
-		// Only keep bold attribute set by the system
-		return (b &^ AttrRegular) | (a & BoldForce)
-	}
-
-	return (a &^ AttrRegular) | b
 }
 
 // handle the following as private members of FullscreenRenderer instance
@@ -265,7 +246,7 @@ func (r *FullscreenRenderer) Size() TermSize {
 	return TermSize{lines, cols, 0, 0}
 }
 
-func (r *FullscreenRenderer) GetChar() Event {
+func (r *FullscreenRenderer) GetChar(cancellable bool) Event {
 	ev := _screen.PollEvent()
 	switch ev := ev.(type) {
 	case *tcell.EventPaste:
@@ -354,6 +335,8 @@ func (r *FullscreenRenderer) GetChar() Event {
 		shift := (mods & tcell.ModShift) > 0
 		ctrlAlt := ctrl && alt
 		altShift := alt && shift
+		ctrlShift := ctrl && shift
+		ctrlAltShift := ctrl && alt && shift
 
 		keyfn := func(r rune) Event {
 			if alt {
@@ -380,8 +363,11 @@ func (r *FullscreenRenderer) GetChar() Event {
 		case tcell.KeyCtrlH:
 			switch ev.Rune() {
 			case 0:
+				if ctrlAlt {
+					return Event{CtrlAltBackspace, 0, nil}
+				}
 				if ctrl {
-					return Event{Backspace, 0, nil}
+					return Event{CtrlBackspace, 0, nil}
 				}
 			case rune(tcell.KeyCtrlH):
 				switch {
@@ -442,6 +428,9 @@ func (r *FullscreenRenderer) GetChar() Event {
 			return Event{CtrlSlash, 0, nil}
 		// section 3: (Alt)+Backspace2
 		case tcell.KeyBackspace2:
+			if ctrl {
+				return Event{CtrlBackspace, 0, nil}
+			}
 			if alt {
 				return Event{AltBackspace, 0, nil}
 			}
@@ -449,8 +438,20 @@ func (r *FullscreenRenderer) GetChar() Event {
 
 		// section 4: (Alt+Shift)+Key(Up|Down|Left|Right)
 		case tcell.KeyUp:
+			if ctrlAltShift {
+				return Event{CtrlAltShiftUp, 0, nil}
+			}
+			if ctrlAlt {
+				return Event{CtrlAltUp, 0, nil}
+			}
+			if ctrlShift {
+				return Event{CtrlShiftUp, 0, nil}
+			}
 			if altShift {
 				return Event{AltShiftUp, 0, nil}
+			}
+			if ctrl {
+				return Event{CtrlUp, 0, nil}
 			}
 			if shift {
 				return Event{ShiftUp, 0, nil}
@@ -460,8 +461,20 @@ func (r *FullscreenRenderer) GetChar() Event {
 			}
 			return Event{Up, 0, nil}
 		case tcell.KeyDown:
+			if ctrlAltShift {
+				return Event{CtrlAltShiftDown, 0, nil}
+			}
+			if ctrlAlt {
+				return Event{CtrlAltDown, 0, nil}
+			}
+			if ctrlShift {
+				return Event{CtrlShiftDown, 0, nil}
+			}
 			if altShift {
 				return Event{AltShiftDown, 0, nil}
+			}
+			if ctrl {
+				return Event{CtrlDown, 0, nil}
 			}
 			if shift {
 				return Event{ShiftDown, 0, nil}
@@ -471,8 +484,20 @@ func (r *FullscreenRenderer) GetChar() Event {
 			}
 			return Event{Down, 0, nil}
 		case tcell.KeyLeft:
+			if ctrlAltShift {
+				return Event{CtrlAltShiftLeft, 0, nil}
+			}
+			if ctrlAlt {
+				return Event{CtrlAltLeft, 0, nil}
+			}
+			if ctrlShift {
+				return Event{CtrlShiftLeft, 0, nil}
+			}
 			if altShift {
 				return Event{AltShiftLeft, 0, nil}
+			}
+			if ctrl {
+				return Event{CtrlLeft, 0, nil}
 			}
 			if shift {
 				return Event{ShiftLeft, 0, nil}
@@ -482,8 +507,20 @@ func (r *FullscreenRenderer) GetChar() Event {
 			}
 			return Event{Left, 0, nil}
 		case tcell.KeyRight:
+			if ctrlAltShift {
+				return Event{CtrlAltShiftRight, 0, nil}
+			}
+			if ctrlAlt {
+				return Event{CtrlAltRight, 0, nil}
+			}
+			if ctrlShift {
+				return Event{CtrlShiftRight, 0, nil}
+			}
 			if altShift {
 				return Event{AltShiftRight, 0, nil}
+			}
+			if ctrl {
+				return Event{CtrlRight, 0, nil}
 			}
 			if shift {
 				return Event{ShiftRight, 0, nil}
@@ -497,20 +534,119 @@ func (r *FullscreenRenderer) GetChar() Event {
 		case tcell.KeyInsert:
 			return Event{Insert, 0, nil}
 		case tcell.KeyHome:
+			if ctrlAltShift {
+				return Event{CtrlAltShiftHome, 0, nil}
+			}
+			if ctrlAlt {
+				return Event{CtrlAltHome, 0, nil}
+			}
+			if ctrlShift {
+				return Event{CtrlShiftHome, 0, nil}
+			}
+			if altShift {
+				return Event{AltShiftHome, 0, nil}
+			}
+			if ctrl {
+				return Event{CtrlHome, 0, nil}
+			}
+			if shift {
+				return Event{ShiftHome, 0, nil}
+			}
+			if alt {
+				return Event{AltHome, 0, nil}
+			}
 			return Event{Home, 0, nil}
 		case tcell.KeyDelete:
+			if ctrlAltShift {
+				return Event{CtrlAltShiftDelete, 0, nil}
+			}
+			if ctrlAlt {
+				return Event{CtrlAltDelete, 0, nil}
+			}
+			if ctrlShift {
+				return Event{CtrlShiftDelete, 0, nil}
+			}
+			if altShift {
+				return Event{AltShiftDelete, 0, nil}
+			}
 			if ctrl {
 				return Event{CtrlDelete, 0, nil}
+			}
+			if alt {
+				return Event{AltDelete, 0, nil}
 			}
 			if shift {
 				return Event{ShiftDelete, 0, nil}
 			}
 			return Event{Delete, 0, nil}
 		case tcell.KeyEnd:
+			if ctrlAltShift {
+				return Event{CtrlAltShiftEnd, 0, nil}
+			}
+			if ctrlAlt {
+				return Event{CtrlAltEnd, 0, nil}
+			}
+			if ctrlShift {
+				return Event{CtrlShiftEnd, 0, nil}
+			}
+			if altShift {
+				return Event{AltShiftEnd, 0, nil}
+			}
+			if ctrl {
+				return Event{CtrlEnd, 0, nil}
+			}
+			if shift {
+				return Event{ShiftEnd, 0, nil}
+			}
+			if alt {
+				return Event{AltEnd, 0, nil}
+			}
 			return Event{End, 0, nil}
 		case tcell.KeyPgUp:
+			if ctrlAltShift {
+				return Event{CtrlAltShiftPageUp, 0, nil}
+			}
+			if ctrlAlt {
+				return Event{CtrlAltPageUp, 0, nil}
+			}
+			if ctrlShift {
+				return Event{CtrlShiftPageUp, 0, nil}
+			}
+			if altShift {
+				return Event{AltShiftPageUp, 0, nil}
+			}
+			if ctrl {
+				return Event{CtrlPageUp, 0, nil}
+			}
+			if shift {
+				return Event{ShiftPageUp, 0, nil}
+			}
+			if alt {
+				return Event{AltPageUp, 0, nil}
+			}
 			return Event{PageUp, 0, nil}
 		case tcell.KeyPgDn:
+			if ctrlAltShift {
+				return Event{CtrlAltShiftPageDown, 0, nil}
+			}
+			if ctrlAlt {
+				return Event{CtrlAltPageDown, 0, nil}
+			}
+			if ctrlShift {
+				return Event{CtrlShiftPageDown, 0, nil}
+			}
+			if altShift {
+				return Event{AltShiftPageDown, 0, nil}
+			}
+			if ctrl {
+				return Event{CtrlPageDown, 0, nil}
+			}
+			if shift {
+				return Event{ShiftPageDown, 0, nil}
+			}
+			if alt {
+				return Event{AltPageDown, 0, nil}
+			}
 			return Event{PageDown, 0, nil}
 		case tcell.KeyBacktab:
 			return Event{ShiftTab, 0, nil}
@@ -567,15 +703,19 @@ func (r *FullscreenRenderer) GetChar() Event {
 	return Event{Invalid, 0, nil}
 }
 
+func (r *FullscreenRenderer) CancelGetChar() {
+	// TODO
+}
+
 func (r *FullscreenRenderer) Pause(clear bool) {
 	if clear {
-		r.Close()
+		_screen.Suspend()
 	}
 }
 
 func (r *FullscreenRenderer) Resume(clear bool, sigcont bool) {
 	if clear {
-		r.initScreen()
+		_screen.Resume()
 	}
 }
 
@@ -593,8 +733,8 @@ func (r *FullscreenRenderer) RefreshWindows(windows []Window) {
 }
 
 func (r *FullscreenRenderer) NewWindow(top int, left int, width int, height int, windowType WindowType, borderStyle BorderStyle, erase bool) Window {
-	width = util.Max(0, width)
-	height = util.Max(0, height)
+	width = max(0, width)
+	height = max(0, height)
 	normal := ColBorder
 	switch windowType {
 	case WindowList:
