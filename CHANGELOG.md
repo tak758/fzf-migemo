@@ -1,6 +1,128 @@
 CHANGELOG
 =========
 
+0.71.0
+------
+- Cross-reload item identity with `--id-nth`
+    - Added `--id-nth=NTH` to define item identity fields for cross-reload operations
+    - When a `reload` is triggered with tracking enabled, fzf searches for the tracked item by its identity fields in the new list.
+        - `--track --id-nth ..` tracks by the entire line
+        - `--track --id-nth 1` tracks by the first field
+        - `--track` without `--id-nth` retains the existing index-based tracking behavior
+        - The UI is temporarily blocked (prompt dimmed, input disabled) until the item is found or loading completes.
+            - Press `Escape` or `Ctrl-C` to cancel the blocked state without quitting
+            - Info line shows `+T*` / `+t*` while searching
+    - With `--multi`, selected items are preserved across `reload-sync` by matching their identity fields
+- Performance improvements
+    - The search performance now scales linearly with the number of CPU cores, as we dropped static partitioning to allow better load balancing across threads.
+      ```
+      === query: 'linux' ===
+        [all]   baseline:    17.12ms  current:    14.28ms  (1.20x)  matches: 179966 (12.79%)
+        [1T]    baseline:   136.49ms  current:   137.25ms  (0.99x)  matches: 179966 (12.79%)
+        [2T]    baseline:    75.74ms  current:    68.75ms  (1.10x)  matches: 179966 (12.79%)
+        [4T]    baseline:    41.16ms  current:    34.97ms  (1.18x)  matches: 179966 (12.79%)
+        [8T]    baseline:    32.82ms  current:    17.79ms  (1.84x)  matches: 179966 (12.79%)
+      ```
+    - Improved the cache structure, reducing memory footprint per entry by 86x.
+        - With the reduced per-entry cost, the cache now has broader coverage.
+- fish: Improved command history (CTRL-R) (#4703) (@bitraid)
+- Bug fixes
+    - `--walker=follow` no longer follows symlinks whose target is an ancestor of the walker root, avoiding severe resource exhaustion when a symlink points outside the tree (e.g. Wine's `z:` → `/`) (#4710)
+    - Fixed AWK tokenizer not treating a new line character as whitespace
+    - Fixed `--{accept,with}-nth` removing trailing whitespaces with a non-default `--delimiter`
+    - Fixed OSC8 hyperlinks being mangled when the URL contains unicode characters (#4707)
+    - Fixed `--with-shell` not handling quoted arguments correctly (#4709)
+
+0.70.0
+------
+- Added `change-with-nth` action for dynamically changing the `--with-nth` option.
+    - Requires `--with-nth` to be set initially.
+    - Multiple options separated by `|` can be given to cycle through.
+  ```sh
+  echo -e "a b c\nd e f\ng h i" | fzf --with-nth .. \
+    --bind 'space:change-with-nth(1|2|3|1,3|2,3|)'
+  ```
+- Added `change-header-lines` action for dynamically changing the `--header-lines` option
+- Performance improvements (1.3x to 1.9x faster filtering depending on query)
+  ```
+  === query: 'l' ===
+    [all]   baseline:   168.87ms  current:    95.21ms  (1.77x)  matches: 5069891 (94.78%)
+    [1T]    baseline:  1652.22ms  current:   841.40ms  (1.96x)  matches: 5069891 (94.78%)
+
+  === query: 'lin' ===
+    [all]   baseline:   343.27ms  current:   252.59ms  (1.36x)  matches: 3516507 (65.74%)
+    [1T]    baseline:  3199.89ms  current:  2230.64ms  (1.43x)  matches: 3516507 (65.74%)
+
+  === query: 'linux' ===
+    [all]   baseline:    85.47ms  current:    63.72ms  (1.34x)  matches: 307229 (5.74%)
+    [1T]    baseline:   774.64ms  current:   589.32ms  (1.31x)  matches: 307229 (5.74%)
+
+  === query: 'linuxlinux' ===
+    [all]   baseline:    55.13ms  current:    35.67ms  (1.55x)  matches: 12230 (0.23%)
+    [1T]    baseline:   461.99ms  current:   332.38ms  (1.39x)  matches: 12230 (0.23%)
+
+  === query: 'linuxlinuxlinux' ===
+    [all]   baseline:    51.77ms  current:    32.53ms  (1.59x)  matches: 865 (0.02%)
+    [1T]    baseline:   409.99ms  current:   296.33ms  (1.38x)  matches: 865 (0.02%)
+  ```
+- Fixed `nth` attribute merge order to respect precedence hierarchy (#4697)
+- bash: Replaced `printf` with builtin `printf` to bypass local indirections (#4684) (@DarrenBishop)
+
+0.68.0
+------
+- Implemented word wrapping in the list section
+    - Added `--wrap=word` (or `--wrap-word`) option and `toggle-wrap-word` action for word-level line wrapping in the list section
+    - Changed default binding of `ctrl-/` and `alt-/` from `toggle-wrap` to `toggle-wrap-word`
+  ```sh
+  fzf --wrap=word
+  ```
+- Implemented word wrapping in the preview window
+    - Added `wrap-word` flag for `--preview-window` to enable word-level wrapping
+    - Added `toggle-preview-wrap-word` action
+  ```sh
+  fzf --preview 'bat --style=plain --color=always {}' \
+      --preview-window wrap-word \
+      --bind space:toggle-preview-wrap-word
+  ```
+- Added support for underline style variants in `--color`: `underline-double`, `underline-curly`, `underline-dotted`, `underline-dashed`
+  ```sh
+  fzf --color 'fg:underline-curly,current-fg:underline-dashed'
+  ```
+- Added support for underline styles (`4:N`) and underline colors (SGR 58/59)
+  ```sh
+  # In the list section
+  printf '\e[4:3;58;2;255;0;0mRed curly underline\e[0m\n' | fzf --ansi
+
+  # In the preview window
+  fzf --preview "printf '\e[4:3;58;2;255;0;0mRed curly underline\e[0m\n'"
+  ```
+- Added `--preview-wrap-sign` to set a different wrap indicator for the preview window
+- Added `alt-gutter` color option (#4602) (@hedgieinsocks)
+- Added `$FZF_WRAP` environment variable to child processes (`char` or `word` when wrapping is enabled) (#4672) (@bitraid)
+- fish: Improved command history (CTRL-R) (#4672) (@bitraid)
+    - Enabled syntax highlighting in the list on fish 4.3.3+
+    - Added syntax-highlighted preview window that auto-shows for long or multi-line commands
+    - Added `ALT-ENTER` to reformat and insert selected commands
+    - Improved handling of bulk deletion of selected history entries (`SHIFT-DELETE`)
+- Added fish completion support (#4605) (@lalvarezt)
+- zsh: Handle multi-line history selection (#4595) (@LangLangBart)
+- Bug fixes
+    - Fixed `_fzf_compgen_{path,dir}` to respect `FZF_COMPLETION_{PATH,DIR}_OPTS` (#4592) (@shtse8, @LangLangBart)
+    - Fixed `--preview-window follow` not working correctly with wrapping (#3243, #4258)
+    - Fixed symlinks to directories being returned as files (#4676) (@skk64)
+    - Fixed SIGHUP signal handling (#4668) (@LangLangBart)
+    - Fixed preview process not killed on exit (#4667)
+    - Fixed coloring of items with zero-width characters (#4620)
+    - Fixed `track-current` unset after a combined movement action (#4649)
+    - Fixed `--accept-nth` being ignored in filter mode (#4636) (@charemma)
+    - Fixed display width calculation with `maxWidth` (#4596) (@LangLangBart)
+    - Fixed clearing of the rest of the current line on start (#4652)
+    - Fixed `x-api-key` header not required for GET requests (#4627)
+    - Fixed key reading not cancelled when `execute` triggered via a server request (#4653)
+    - Fixed rebind of readline command `redraw-current-line` (#4635) (@jameslazo)
+    - Fixed `fzf-tmux` `TERM` quoting and added `mktemp` usage (#4664) (@Goofygiraffe06)
+    - Do not allow very long queries in `FuzzyMatchV2` (#4608)
+
 0.67.0
 ------
 - Added `--freeze-left=N` option to keep the leftmost N columns always visible.

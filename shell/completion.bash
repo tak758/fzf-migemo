@@ -38,9 +38,9 @@ if [[ $- =~ i ]]; then
 # the changes. See code comments in "common.sh" for the implementation details.
 
 __fzf_defaults() {
-  printf '%s\n' "--height ${FZF_TMUX_HEIGHT:-40%} --min-height 20+ --bind=ctrl-z:ignore $1"
+  builtin printf '%s\n' "--height ${FZF_TMUX_HEIGHT:-40%} --min-height 20+ --bind=ctrl-z:ignore $1"
   command cat "${FZF_DEFAULT_OPTS_FILE-}" 2> /dev/null
-  printf '%s\n' "${FZF_DEFAULT_OPTS-} $2"
+  builtin printf '%s\n' "${FZF_DEFAULT_OPTS-} $2"
 }
 
 __fzf_exec_awk() {
@@ -81,7 +81,7 @@ __fzf_orig_completion() {
       f="${BASH_REMATCH[2]}"
       cmd="${BASH_REMATCH[3]}"
       [[ $f == _fzf_* ]] && continue
-      printf -v "_fzf_orig_completion_${cmd//[^A-Za-z0-9_]/_}" "%s" "${comp} %s ${cmd} #${f}"
+      builtin printf -v "_fzf_orig_completion_${cmd//[^A-Za-z0-9_]/_}" "%s" "${comp} %s ${cmd} #${f}"
       if [[ $l == *" -o nospace "* ]] && [[ ${__fzf_nospace_commands-} != *" $cmd "* ]]; then
         __fzf_nospace_commands="${__fzf_nospace_commands-} $cmd "
       fi
@@ -111,7 +111,7 @@ __fzf_orig_completion_instantiate() {
   orig="${!orig_var-}"
   orig="${orig%#*}"
   [[ $orig == *' %s '* ]] || return 1
-  printf -v REPLY "$orig" "$func"
+  builtin printf -v REPLY "$orig" "$func"
 }
 
 _fzf_opts_completion() {
@@ -124,6 +124,7 @@ _fzf_opts_completion() {
     +i --no-ignore-case
     +s --no-sort
     +x --no-extended
+    --accept-nth
     --ansi
     --bash
     --bind
@@ -137,56 +138,89 @@ _fzf_opts_completion() {
     --expect
     --filepath-word
     --fish
+    --footer
+    --footer-border
+    --footer-label
+    --footer-label-pos
+    --freeze-left
+    --freeze-right
+    --gap
+    --gap-line
+    --ghost
+    --gutter
+    --gutter-raw
     --header
+    --header-border
     --header-first
+    --header-label
+    --header-label-pos
     --header-lines
+    --header-lines-border
     --height
     --highlight-line
     --history
     --history-size
     --hscroll-off
+    --id-nth
     --info
+    --info-command
+    --input-border
+    --input-label
+    --input-label-pos
     --jump-labels
     --keep-right
     --layout
     --listen
     --listen-unsafe
+    --list-border
+    --list-label
+    --list-label-pos
     --literal
     --man
     --margin
     --marker
+    --marker-multi-line
     --min-height
     --no-bold
-    --no-clear
     --no-hscroll
-    --no-mouse
+    --no-input
+    --no-multi-line
     --no-scrollbar
     --no-separator
-    --no-unicode
     --padding
     --pointer
     --preview
+    --preview-border
     --preview-label
     --preview-label-pos
     --preview-window
     --print-query
     --print0
     --prompt
+    --raw
     --read0
-    --reverse
     --scheme
     --scroll-off
+    --scrollbar
     --separator
+    --smart-case
+    --style
     --sync
     --tabstop
     --tac
+    --tail
     --tiebreak
     --tmux
     --track
     --version
+    --walker
+    --walker-root
+    --walker-skip
     --with-nth
     --with-shell
     --wrap
+    --wrap-sign
+    --preview-wrap-sign
     --zsh
     -0 --exit-0
     -1 --select-1
@@ -206,11 +240,11 @@ _fzf_opts_completion() {
       return 0
       ;;
     --tiebreak)
-      COMPREPLY=($(compgen -W "length chunk begin end index" -- "$cur"))
+      COMPREPLY=($(compgen -W "length chunk pathname begin end index" -- "$cur"))
       return 0
       ;;
     --color)
-      COMPREPLY=($(compgen -W "dark light 16 bw no" -- "$cur"))
+      COMPREPLY=($(compgen -W "dark light base16 16 bw no" -- "$cur"))
       return 0
       ;;
     --layout)
@@ -221,12 +255,21 @@ _fzf_opts_completion() {
       COMPREPLY=($(compgen -W "default right hidden inline inline-right" -- "$cur"))
       return 0
       ;;
+    --wrap)
+      COMPREPLY=($(compgen -W "char word" -- "$cur"))
+      return 0
+      ;;
+    --style)
+      COMPREPLY=($(compgen -W "default minimal full" -- "$cur"))
+      return 0
+      ;;
     --preview-window)
       COMPREPLY=($(compgen -W "
       default
       hidden
       nohidden
       wrap
+      wrap-word
       nowrap
       cycle
       nocycle
@@ -235,6 +278,7 @@ _fzf_opts_completion() {
       left
       right
       rounded border border-rounded
+      border-line
       sharp border-sharp
       border-bold
       border-block
@@ -248,14 +292,16 @@ _fzf_opts_completion() {
       border-left
       border-right
       follow
-      nofollow" -- "$cur"))
+      nofollow
+      info
+      noinfo" -- "$cur"))
       return 0
       ;;
-    --border)
-      COMPREPLY=($(compgen -W "rounded sharp bold block thinblock double horizontal vertical top bottom left right none" -- "$cur"))
+    --border | --list-border | --header-border | --header-lines-border | --footer-border | --input-border | --preview-border)
+      COMPREPLY=($(compgen -W "line rounded sharp bold block thinblock double horizontal vertical top bottom left right none" -- "$cur"))
       return 0
       ;;
-    --border-label-pos | --preview-label-pos)
+    --border-label-pos | --preview-label-pos | --list-label-pos | --header-label-pos | --footer-label-pos | --input-label-pos)
       COMPREPLY=($(compgen -W "center bottom top" -- "$cur"))
       return 0
       ;;
@@ -325,19 +371,22 @@ __fzf_generic_path_completion() {
         matches=$(
           export FZF_DEFAULT_OPTS=$(__fzf_defaults "--reverse --scheme=path" "${FZF_COMPLETION_OPTS-} $2")
           unset FZF_DEFAULT_COMMAND FZF_DEFAULT_OPTS_FILE
+          if [[ $1 =~ dir ]]; then
+            eval "rest=(${FZF_COMPLETION_DIR_OPTS-})"
+          else
+            eval "rest=(${FZF_COMPLETION_PATH_OPTS-})"
+          fi
           if declare -F "$1" > /dev/null; then
-            eval "$1 $(printf %q "$dir")" | __fzf_comprun "$4" -q "$leftover"
+            eval "$1 $(builtin printf %q "$dir")" | __fzf_comprun "$4" -q "$leftover" "${rest[@]}"
           else
             if [[ $1 =~ dir ]]; then
               walker=dir,follow
-              eval "rest=(${FZF_COMPLETION_DIR_OPTS-})"
             else
               walker=file,dir,follow,hidden
-              eval "rest=(${FZF_COMPLETION_PATH_OPTS-})"
             fi
             __fzf_comprun "$4" -q "$leftover" --walker "$walker" --walker-root="$dir" "${rest[@]}"
           fi | while read -r item; do
-            printf "%q " "${item%$3}$3"
+            builtin printf "%q " "${item%$3}$3"
           done
         )
         matches=${matches% }
@@ -347,9 +396,9 @@ __fzf_generic_path_completion() {
         else
           COMPREPLY=("$cur")
         fi
-        # To redraw line after fzf closes (printf '\e[5n')
+        # To redraw line after fzf closes (builtin printf '\e[5n')
         bind '"\e[0n": redraw-current-line' 2> /dev/null
-        printf '\e[5n'
+        builtin printf '\e[5n'
         return 0
       fi
       dir=$(command dirname "$dir")
@@ -407,7 +456,7 @@ _fzf_complete() {
       COMPREPLY=("$cur")
     fi
     bind '"\e[0n": redraw-current-line' 2> /dev/null
-    printf '\e[5n'
+    builtin printf '\e[5n'
     return 0
   else
     _fzf_handle_dynamic_completion "$cmd" "${rest[@]}"
@@ -479,7 +528,7 @@ _fzf_proc_completion_post() {
 #     # Set the local attribute for any non-local variable that is set by _known_hosts_real()
 #     local COMPREPLY=()
 #     _known_hosts_real ''
-#     printf '%s\n' "${COMPREPLY[@]}" | command sort -u --version-sort
+#     builtin printf '%s\n' "${COMPREPLY[@]}" | command sort -u --version-sort
 #   }
 if ! declare -F __fzf_list_hosts > /dev/null; then
   __fzf_list_hosts() {
