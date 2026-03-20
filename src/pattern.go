@@ -62,7 +62,7 @@ type Pattern struct {
 	delimiter     Delimiter
 	nth           []Range
 	revision      revision
-	procFun       [6]algo.Algo
+	procFun       [7]algo.Algo
 	cache         *ChunkCache
 	denylist      map[int32]struct{}
 	startIndex    int32
