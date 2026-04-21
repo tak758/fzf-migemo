@@ -1,8 +1,35 @@
 CHANGELOG
 =========
 
+0.72.0
+------
+- `--header-border`, `--header-lines-border`, and `--footer-border` now accept a new `inline` style that embeds the section inside the list frame, separated from the list content by a horizontal line. When the list border has side segments, the separator joins them as T-junctions.
+    - Requires a `--list-border` shape that has both top and bottom segments (`rounded`, `sharp`, `bold`, `double`, `block`, `thinblock`, or `horizontal`); falls back to `line` otherwise. `horizontal` has no side borders, so the separator is drawn without T-junction endpoints.
+    - Sections stack. Example combining all three:
+      ```sh
+      ps -ef | fzf --reverse --style full:double \
+          --header 'Select a process' --header-lines 1 \
+          --bind 'load:transform-footer:echo $FZF_TOTAL_COUNT processes' \
+          --header-border=inline --header-lines-border=inline \
+          --footer-border=inline
+      ```
+    - `--header-label` and `--footer-label` render on their respective separator row.
+    - The separator inherits `--color list-border` when the section's own border color is not explicitly set.
+    - `inline` takes precedence over `--header-first`: the inline section stays inside the list frame. `--header-border=inline` requires `--header-lines-border` to be `inline` or unset.
+- [vim] Move and resize popup window when detecting `VimResized` event (#4778) (@Vulcalien)
+- Bug fixes
+    - Fixed gutter display in `--style=minimal`
+    - Fixed arrow keys / Home / End without modifiers being ignored under the kitty keyboard protocol (#4776) (@TymekDev)
+    - bash: Persist history deletion when `histappend` is on (#4764)
+
 0.71.0
 ------
+_Release highlights: https://junegunn.github.io/fzf/releases/0.71.0/_
+
+- Added `--popup` as a new name for `--tmux` with Zellij support
+    - `--popup` starts fzf in a tmux popup or a Zellij floating pane
+    - `--tmux` is now an alias for `--popup`
+    - Requires tmux 3.3+ or Zellij 0.44+
 - Cross-reload item identity with `--id-nth`
     - Added `--id-nth=NTH` to define item identity fields for cross-reload operations
     - When a `reload` is triggered with tracking enabled, fzf searches for the tracked item by its identity fields in the new list.
@@ -17,21 +44,34 @@ CHANGELOG
     - The search performance now scales linearly with the number of CPU cores, as we dropped static partitioning to allow better load balancing across threads.
       ```
       === query: 'linux' ===
-        [all]   baseline:    17.12ms  current:    14.28ms  (1.20x)  matches: 179966 (12.79%)
-        [1T]    baseline:   136.49ms  current:   137.25ms  (0.99x)  matches: 179966 (12.79%)
-        [2T]    baseline:    75.74ms  current:    68.75ms  (1.10x)  matches: 179966 (12.79%)
-        [4T]    baseline:    41.16ms  current:    34.97ms  (1.18x)  matches: 179966 (12.79%)
-        [8T]    baseline:    32.82ms  current:    17.79ms  (1.84x)  matches: 179966 (12.79%)
+        [all]   baseline:    21.95ms  current:    17.47ms  (1.26x)  matches: 179966 (12.79%)
+        [1T]    baseline:   179.63ms  current:   180.53ms  (1.00x)  matches: 179966 (12.79%)
+        [2T]    baseline:    97.38ms  current:    90.05ms  (1.08x)  matches: 179966 (12.79%)
+        [4T]    baseline:    53.83ms  current:    44.77ms  (1.20x)  matches: 179966 (12.79%)
+        [8T]    baseline:    41.66ms  current:    22.58ms  (1.84x)  matches: 179966 (12.79%)
       ```
     - Improved the cache structure, reducing memory footprint per entry by 86x.
         - With the reduced per-entry cost, the cache now has broader coverage.
-- fish: Improved command history (CTRL-R) (#4703) (@bitraid)
+- Shell integration improvements
+    - bash: CTRL-R now supports multi-select and `shift-delete` to delete history entries (#4715)
+    - fish:
+        - Improved command history (CTRL-R) (#4703) (@bitraid)
+        - Rewrite completion script (SHIFT-TAB) (#4731) (@bitraid)
+        - Increase minimum fish version requirement to 3.4.0 (#4731) (@bitraid)
+- `GET /` HTTP endpoint now includes `positions` field in each match entry, providing the indices of matched characters for external highlighting (#4726)
+- Allow adaptive height with negative value (`--height=~-HEIGHT`) (#4682)
 - Bug fixes
     - `--walker=follow` no longer follows symlinks whose target is an ancestor of the walker root, avoiding severe resource exhaustion when a symlink points outside the tree (e.g. Wine's `z:` → `/`) (#4710)
     - Fixed AWK tokenizer not treating a new line character as whitespace
     - Fixed `--{accept,with}-nth` removing trailing whitespaces with a non-default `--delimiter`
     - Fixed OSC8 hyperlinks being mangled when the URL contains unicode characters (#4707)
     - Fixed `--with-shell` not handling quoted arguments correctly (#4709)
+    - Fixed child processes not being terminated on Windows (#4723) (@pjeby)
+    - Fixed preview scrollbar not rendered after `toggle-preview`
+    - Fixed preview follow/scroll with long wrapped lines
+    - Fixed tab width when `--frozen-left` is used
+    - Fixed preview mouse events being processed when no preview window exists
+    - zsh: Fixed history widget when `sh_glob` option is on (#4714) (@EvanHahn)
 
 0.70.0
 ------
