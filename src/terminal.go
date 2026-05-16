@@ -1816,14 +1816,16 @@ func (t *Terminal) changeHeader(header string) bool {
 	return needFullRedraw
 }
 
-func (t *Terminal) changeFooter(footer string) {
+func (t *Terminal) changeFooter(footer string) bool {
 	var lines []string
 	if len(footer) > 0 {
 		lines = strings.Split(strings.TrimSuffix(footer, "\n"), "\n")
 	}
+	needFullRedraw := len(t.footer) != len(lines)
 	t.footer = lines
 	t.clickFooterLine = 0
 	t.clickFooterColumn = 0
+	return needFullRedraw
 }
 
 // UpdateHeader updates the header
@@ -2155,7 +2157,7 @@ func (t *Terminal) adjustMarginAndPadding() (int, int, [4]int, [4]int) {
 			if idx == 3 {
 				extraMargin[idx] += 1 + bw
 			}
-		case tui.BorderRounded, tui.BorderSharp, tui.BorderBold, tui.BorderBlock, tui.BorderThinBlock, tui.BorderDouble:
+		case tui.BorderRounded, tui.BorderSharp, tui.BorderBold, tui.BorderBlock, tui.BorderThinBlock, tui.BorderDouble, tui.BorderDashed:
 			extraMargin[idx] += 1 + bw*(idx%2)
 		}
 		marginInt[idx] = sizeSpecToInt(idx, sizeSpec) + extraMargin[idx]
@@ -3017,7 +3019,7 @@ func (t *Terminal) printLabel(window tui.Window, render labelPrinter, opts label
 		return
 	}
 	switch borderShape {
-	case tui.BorderHorizontal, tui.BorderTop, tui.BorderBottom, tui.BorderRounded, tui.BorderSharp, tui.BorderBold, tui.BorderBlock, tui.BorderThinBlock, tui.BorderDouble:
+	case tui.BorderHorizontal, tui.BorderTop, tui.BorderBottom, tui.BorderRounded, tui.BorderSharp, tui.BorderBold, tui.BorderBlock, tui.BorderThinBlock, tui.BorderDouble, tui.BorderDashed:
 		if redrawBorder {
 			window.DrawHBorder()
 		}
@@ -3602,18 +3604,18 @@ func (t *Terminal) renderEmptyLine(line int, barRange [2]int) {
 func (t *Terminal) gutter(current bool, alt bool) {
 	var color tui.ColorPair
 	if current {
-		color = tui.ColCurrentCursorEmpty
+		color = tui.ColCurrentPointerEmpty
 	} else if !t.raw && t.gutterReverse || t.raw && t.gutterRawReverse {
 		if alt {
-			color = tui.ColAltCursorEmpty
+			color = tui.ColAltPointerEmpty
 		} else {
-			color = tui.ColCursorEmpty
+			color = tui.ColPointerEmpty
 		}
 	} else {
 		if alt {
-			color = tui.ColAltCursorEmptyChar
+			color = tui.ColAltPointerEmptyChar
 		} else {
-			color = tui.ColCursorEmptyChar
+			color = tui.ColPointerEmptyChar
 		}
 	}
 	gutter := t.pointerEmpty
@@ -3801,7 +3803,7 @@ func (t *Terminal) printItem(result Result, line int, maxLine int, index int, cu
 			if len(label) == 0 {
 				t.gutter(true, false)
 			} else {
-				t.window.CPrint(tui.ColCurrentCursor, label)
+				t.window.CPrint(tui.ColCurrentPointer, label)
 			}
 			if w-t.markerLen < 0 {
 				return indentSize
@@ -3830,7 +3832,7 @@ func (t *Terminal) printItem(result Result, line int, maxLine int, index int, cu
 			if len(label) == 0 {
 				t.gutter(false, index%2 == 1)
 			} else {
-				t.window.CPrint(tui.ColCursor, label)
+				t.window.CPrint(tui.ColPointer, label)
 			}
 			if w-t.markerLen < 0 {
 				return indentSize
@@ -6796,7 +6798,12 @@ func (t *Terminal) Loop() error {
 				})
 			case actChangeFooter, actTransformFooter, actBgTransformFooter:
 				capture(false, func(footer string) {
-					t.changeFooter(footer)
+					if t.changeFooter(footer) && t.footerBorderShape == tui.BorderInline {
+						// resizeIfNeeded() tolerates a shorter-than-wanted inline
+						// window, so a length change can leave the inline slot
+						// stale. Force a redraw to re-run the layout.
+						req(reqRedraw)
+					}
 					req(reqFooter)
 				})
 			case actChangeHeaderLabel, actTransformHeaderLabel, actBgTransformHeaderLabel:
@@ -7811,6 +7818,11 @@ func (t *Terminal) Loop() error {
 				// Reset preview options and apply the additional options
 				t.previewOpts = t.initialPreviewOpts
 				t.previewOpts.command = currentPreviewOpts.command
+
+				// Carry over toggle-driven state so toggle-preview-wrap survives
+				// a change-preview-window. Tokens below can still override.
+				t.previewOpts.wrap = currentPreviewOpts.wrap
+				t.previewOpts.wrapWord = currentPreviewOpts.wrapWord
 
 				// Split window options
 				tokens := strings.Split(a.a, "|")
