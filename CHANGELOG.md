@@ -1,10 +1,53 @@
 CHANGELOG
 =========
 
-0.73.0
+0.74.0 (WIP)
+------------
+- Added `result-final` event, a variant of `result` that is not triggered while the input stream is still open (#4835)
+    - Use it for one-shot, per-query actions that would otherwise re-fire on every intermediate snapshot during loading
+      ```sh
+      # 'result' fires per intermediate snapshot (header keeps updating during load);
+      # 'result-final' fires once after the stream closes (footer shows the final count)
+      (seq 100; sleep 1; seq 100) | fzf --query 1 \
+        --bind 'result:transform-header(echo result: $FZF_MATCH_COUNT),result-final:transform-footer(echo final: $FZF_MATCH_COUNT)'
+      ```
+- Bound `alt-left` to `backward-word` and `alt-right` to `forward-word` by default (#4833)
+- Skip `$FZF_CURRENT_ITEM` export when the item is larger than 64 KB; a huge item can overflow `ARG_MAX` and break preview and other child commands with `E2BIG` (#4806)
+
+0.73.1
 ------
 - Bug fixes
-    - `change-preview-window` no longer resets `wrap` / `wrap-word` state set via `toggle-preview-wrap` / `toggle-preview-wrap-word`. Layout fields still snap to the preset, so cycling and the empty-token reset behave as before. The new spec can still override by including `wrap` or `nowrap` explicitly. (#4791)
+    - Skip `$FZF_CURRENT_ITEM` export when the item contains a NUL byte; `exec(2)` rejects the env, breaking preview and other child commands (#4806)
+    - Fixed O(n^2) HTTP body accumulation in `--listen`; a single ~390 KB request could block the single-threaded server for ~8 s (Michal Majchrowicz, Marcin Wyczechowski, AFINE Team)
+
+0.73.0
+------
+_Release highlights: https://junegunn.github.io/fzf/releases/0.73.0/_
+
+- Nushell integration via `fzf --nushell` and the installer (#4630) (@sim590)
+- New `--preview-window=next` position that places the preview adjacent to the input section, on the list side: above the input in the default layout, below it in `--layout=reverse` (#4798)
+- Timer-driven `every(N)` event for `--bind`, where `N` is seconds
+- Added `$FZF_IDLE_TIME` (whole seconds) and `$FZF_IDLE_TIME_MS` (milliseconds), holding the elapsed time since the last user activity
+    - Pair with `every(N)` to build idle-based behavior such as auto-accept or auto-quit (#1211)
+      ```sh
+      # Live process list; --track --id-nth 2 keeps the cursor on the same PID across reloads
+      fzf --header-lines 1 --track --id-nth 2 --bind 'start,every(2):reload-sync:ps -ef'
+
+      # Auto-accept after 10 seconds of inactivity, with a countdown in the footer after 5s
+      fzf --bind 'every(1):bg-transform:
+        if   [[ $FZF_IDLE_TIME -lt 5  ]]; then echo change-footer:
+        elif [[ $FZF_IDLE_TIME -lt 10 ]]; then echo "change-footer:auto-accept in $((10 - FZF_IDLE_TIME))s"
+        else echo accept
+        fi'
+      ```
+- Added `$FZF_CURRENT_ITEM` for shells where quoting `{}` is awkward (#4802)
+- Bug fixes
+    - Scoring: non-word characters at the start of input or after a delimiter now receive the same boundary bonus as word characters (#4795)
+    - `change-preview-window` no longer resets `wrap` / `wrap-word` state set via `toggle-preview-wrap` / `toggle-preview-wrap-word` (#4791)
+    - Stripped UTF-8-encoded C1 control characters from rendered items to prevent terminal control-sequence injection
+    - Fixed integer-overflow panic in `FuzzyMatchV2` on 32-bit builds (Michal Majchrowicz, Marcin Wyczechowski, AFINE Team)
+    - Fixed `bg-transform` `reload` / `exclude` payloads being dropped
+    - Fixed rendering glitch with preview window on the left combined with footer
 
 0.72.0
 ------

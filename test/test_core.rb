@@ -971,6 +971,24 @@ class TestCore < TestInteractive
     tmux.until { |lines| assert_includes lines[1], ' aabravo/aabravo' }
   end
 
+  def test_transform_put
+    tmux.send_keys %(seq 1000 | #{FZF} --bind 'a:transform:echo put'), :Enter
+    tmux.until { |lines| assert_equal 1000, lines.match_count }
+    tmux.send_keys :a
+    tmux.until { |lines| assert_equal '> a', lines.last }
+    tmux.send_keys :b
+    tmux.until { |lines| assert_equal '> ab', lines.last }
+  end
+
+  # The async callback runs in a later iteration, but 'put' must still insert
+  # the key that triggered the bg-transform (snapshot of the scheduling event).
+  def test_bg_transform_put
+    tmux.send_keys %(seq 1000 | #{FZF} --bind 'a:bg-transform:sleep 0.5; echo put'), :Enter
+    tmux.until { |lines| assert_equal 1000, lines.match_count }
+    tmux.send_keys 'ab'
+    tmux.until { |lines| assert_equal '> ba', lines.last }
+  end
+
   def test_accept_non_empty
     tmux.send_keys %(seq 1000 | #{fzf('--print-query --bind enter:accept-non-empty')}), :Enter
     tmux.until { |lines| assert_equal 1000, lines.match_count }
@@ -1385,6 +1403,96 @@ class TestCore < TestInteractive
     tmux.until { |lines| assert_includes lines, '> 9' }
     tmux.send_keys :BSpace
     tmux.until { |lines| assert_includes lines, '> 1' }
+  end
+
+  def test_result_final_event
+    tmux.send_keys %[(seq 100; sleep 1; seq 100) | #{FZF} \\
+        --query 1 \\
+        --bind 'result:transform-header(echo "R=$FZF_MATCH_COUNT")' \\
+        --bind 'result-final:transform-footer(echo "F=$FZF_MATCH_COUNT")'], :Enter
+    tmux.until { |lines| assert lines.any_include?('R=20') }
+    tmux.until { |lines| refute lines.any_include?('F=20') }
+    tmux.until { |lines| assert lines.any_include?('R=40') }
+    tmux.until { |lines| assert lines.any_include?('F=40') }
+  end
+
+  def test_every_event
+    tmux.send_keys %(seq 100 | fzf --bind 'every(0.2):transform-prompt(cat #{tempname})'), :Enter
+    tmux.until { |lines| assert_equal 100, lines.match_count }
+    # Trigger external state changes; the every() tick should pick them up.
+    writelines(['AAA>'])
+    tmux.until { |lines| assert_includes lines[-1], 'AAA>' }
+    writelines(['BBB>'])
+    tmux.until { |lines| assert_includes lines[-1], 'BBB>' }
+  end
+
+  def test_every_event_multiple_independent_timers
+    # Two timers with different durations should fire independently.
+    fast = tempname + '.fast'
+    slow = tempname + '.slow'
+    FileUtils.rm_f(fast)
+    FileUtils.rm_f(slow)
+    tmux.send_keys %(seq 100 | fzf \\
+        --bind 'every(0.1):execute-silent(printf . >> #{fast})' \\
+        --bind 'every(0.5):execute-silent(printf . >> #{slow})'), :Enter
+    tmux.until { |lines| assert_equal 100, lines.match_count }
+    sleep(1.2)
+    a = File.exist?(fast) ? File.size(fast) : 0
+    b = File.exist?(slow) ? File.size(slow) : 0
+    # Sanity: faster timer fired more times.
+    assert_operator a, :>, b, "fast timer should fire more (#{a} vs #{b})"
+    # Sanity: slow timer fired at least once.
+    assert_operator b, :>=, 1, "slow timer should have fired at least once (#{b})"
+  ensure
+    FileUtils.rm_f(fast)
+    FileUtils.rm_f(slow)
+  end
+
+  def test_every_event_unbind
+    tmux.send_keys %(seq 100 | fzf --bind 'every(0.1):transform-header(date +%S.%N)' --bind 'space:unbind(every(0.1))+change-header(STOPPED)'), :Enter
+    tmux.until { |lines| assert_equal 100, lines.match_count }
+    # Header should be ticking
+    tmux.until { |lines| assert_match(/^  \d{2}\.\d+/, lines[-3]) }
+    tmux.send_keys :Space
+    tmux.until { |lines| assert_includes lines[-3], 'STOPPED' }
+    sleep(0.4)
+    # Header must stay STOPPED after the unbind
+    assert_includes tmux.capture[-3], 'STOPPED'
+  end
+
+  def test_fzf_idle_time_env
+    # FZF_IDLE_TIME + FZF_IDLE_TIME_MS combined with every() implement idle-based behavior.
+    tmux.send_keys %(seq 100 | fzf --bind 'every(0.2):transform-header(echo "s=$FZF_IDLE_TIME ms_ok=$((FZF_IDLE_TIME_MS / 1000 == FZF_IDLE_TIME))")'), :Enter
+    tmux.until { |lines| assert_equal 100, lines.match_count }
+    # Idle counter advances without any input; ms/1000 stays consistent with seconds.
+    tmux.until { |lines| assert_includes lines[-3], 's=1 ms_ok=1' }
+    tmux.until { |lines| assert_includes lines[-3], 's=2 ms_ok=1' }
+    # Any keystroke resets the counter
+    tmux.send_keys 'x'
+    tmux.until { |lines| assert_includes lines[-3], 's=0 ms_ok=1' }
+    tmux.send_keys :BSpace
+    # And it advances again afterwards
+    tmux.until { |lines| assert_includes lines[-3], 's=1 ms_ok=1' }
+  end
+
+  def test_every_event_rejects_invalid_arg
+    %w[every(0) every(-1) every(abc) every()].each do |spec|
+      tmux.send_keys %(seq 1 | fzf --bind '#{spec}:abort' 2>&1; echo done=$?), :Enter
+      tmux.until { |lines| assert(lines.any? { |l| l.include?('done=2') }) }
+      tmux.send_keys 'clear', :Enter
+    end
+  end
+
+  def test_fzf_key_ignores_synthetic_events
+    tmux.send_keys %(seq 100 | fzf --bind 'every(0.2):transform-prompt(echo "[$FZF_KEY]> ")'), :Enter
+    tmux.until { |lines| assert_equal 100, lines.match_count }
+    # No user input yet: prompt should show empty FZF_KEY
+    tmux.until { |lines| assert_includes lines[-1], '[]>' }
+    tmux.send_keys 'x'
+    tmux.until { |lines| assert_includes lines[-1], '[x]>' }
+    # every() ticks shouldn't overwrite FZF_KEY
+    sleep(1)
+    assert_includes tmux.capture[-1], '[x]>'
   end
 
   def test_labels_center
@@ -2074,6 +2182,24 @@ class TestCore < TestInteractive
     tmux.until { |lines| assert lines.any_include?('a b c') || lines.any_include?('d e f') }
   end
 
+  # Regression: actions emitted by bg-transform must affect the iteration that
+  # processes the async result, not the (no-longer-active) iteration that
+  # scheduled the transform. Covers reload (newCommand) and exclude (denylist).
+  def test_bg_transform_action_output
+    tmux.send_keys %(seq 5 | #{FZF} --bind 'a:bg-transform(echo reload:seq 10 20),b:bg-transform(echo exclude)'), :Enter
+    tmux.until { |lines| assert_equal 5, lines.item_count }
+    tmux.send_keys :a
+    tmux.until do |lines|
+      assert_equal 11, lines.match_count
+      assert_includes lines, '> 10'
+    end
+    tmux.send_keys :b
+    tmux.until do |lines|
+      assert_equal 10, lines.match_count
+      assert_includes lines, '> 11'
+    end
+  end
+
   def test_change_with_nth_search
     input = [
       'alpha bravo charlie',
@@ -2189,6 +2315,7 @@ class TestCore < TestInteractive
       FZF_ACTION: 'start',
       FZF_KEY: '',
       FZF_POS: '1',
+      FZF_CURRENT_ITEM: '1',
       FZF_QUERY: '',
       FZF_POINTER: '>',
       FZF_PROMPT: '> ',
@@ -2204,18 +2331,38 @@ class TestCore < TestInteractive
     end
     tmux.send_keys :Tab, :Tab
     tmux.until do
-      expected.merge!(FZF_ACTION: 'toggle-down', FZF_KEY: 'tab', FZF_POS: '3', FZF_SELECT_COUNT: '2')
+      expected.merge!(FZF_ACTION: 'toggle-down', FZF_KEY: 'tab', FZF_POS: '3', FZF_CURRENT_ITEM: '3', FZF_SELECT_COUNT: '2')
       assert_equal expected, env_vars.slice(*expected.keys)
     end
     tmux.send_keys '99'
     tmux.until do
-      expected.merge!(FZF_ACTION: 'char', FZF_KEY: '9', FZF_QUERY: '99', FZF_MATCH_COUNT: '1', FZF_POS: '1')
+      expected.merge!(FZF_ACTION: 'char', FZF_KEY: '9', FZF_QUERY: '99', FZF_MATCH_COUNT: '1', FZF_POS: '1', FZF_CURRENT_ITEM: '99')
       assert_equal expected, env_vars.slice(*expected.keys)
     end
     tmux.send_keys :Space
     tmux.until do
       expected.merge!(FZF_INPUT_STATE: 'disabled', FZF_ACTION: 'disable-search', FZF_KEY: 'space')
       assert_equal expected, env_vars.slice(*expected.keys)
+    end
+  end
+
+  def test_env_current_item_size_limit
+    preview = %[(echo START; env | grep '^FZF_CURRENT_ITEM='; echo END) > #{tempname}]
+    # Large item (> 64 KB) is omitted so it cannot overflow ARG_MAX and break exec
+    tmux.send_keys %(head -c 70000 /dev/zero | tr '\\0' a | #{FZF} --preview-window 0 --preview "#{preview}"), :Enter
+    wait do
+      content = File.exist?(tempname) ? File.read(tempname) : ''
+      assert_includes content, 'END'
+      refute_includes content, 'FZF_CURRENT_ITEM='
+    end
+    tmux.send_keys :Enter
+    FileUtils.rm_f(tempname)
+    # Smaller item is exported as usual
+    tmux.send_keys %(head -c 1000 /dev/zero | tr '\\0' a | #{FZF} --preview-window 0 --preview "#{preview}"), :Enter
+    wait do
+      content = File.exist?(tempname) ? File.read(tempname) : ''
+      assert_includes content, 'END'
+      assert_includes content, 'FZF_CURRENT_ITEM=' + ('a' * 1000)
     end
   end
 

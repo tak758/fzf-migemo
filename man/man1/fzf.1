@@ -21,7 +21,7 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 ..
-.TH fzf 1 "Apr 2026" "fzf 0.72.0" "fzf - a command-line fuzzy finder"
+.TH fzf 1 "May 2026" "fzf 0.73.1" "fzf - a command-line fuzzy finder"
 
 .SH NAME
 fzf - a command-line fuzzy finder
@@ -226,7 +226,7 @@ Enable processing of ANSI color codes
 Synchronous search for multi-staged filtering. If specified, fzf will launch
 the finder only after the input stream is complete and the initial filtering
 and the associated actions (bound to any of \fBstart\fR, \fBload\fR,
-\fBresult\fR, or \fBfocus\fR) are complete.
+\fBresult\fR, \fBresult\-final\fR, or \fBfocus\fR) are complete.
 
 .RS
 e.g. \fB# Avoid rendering both fzf instances at the same time
@@ -993,8 +993,13 @@ border line.
     \fBdown
     \fBleft
     \fBright
+    \fBnext
 
 \fRDetermines the layout of the preview window.
+
+* \fBnext\fR places the preview window adjacent to the input section, on
+the list side: above the input in the default layout, below the input
+in \fB\-\-layout=reverse\fR.
 
 * If the argument contains \fB:hidden\fR, the preview window will be hidden by
 default until \fBtoggle\-preview\fR action is triggered.
@@ -1368,6 +1373,12 @@ Print script to set up Fish shell integration
 
 e.g. \fBfzf \-\-fish | source\fR
 
+.TP
+.B "\-\-nushell"
+Print script to set up Nushell shell integration
+
+e.g. \fBfzf \-\-nushell | save \-f ~/.config/nushell/autoload/_fzf_integration.nu\fR
+
 .SS OTHERS
 .TP
 .B "\-\-no\-mouse"
@@ -1470,6 +1481,8 @@ fzf exports the following environment variables to its child processes.
 .br
 .BR FZF_POS "             Vertical position of the cursor in the list starting from 1"
 .br
+.BR FZF_CURRENT_ITEM "    Text of the current item (unset if the list is empty)"
+.br
 .BR FZF_WRAP "            The line wrapping mode (char, word) when enabled"
 .br
 .BR FZF_QUERY "           Current query string"
@@ -1500,6 +1513,10 @@ fzf exports the following environment variables to its child processes.
 .br
 .BR FZF_KEY "             The name of the last key pressed"
 .br
+.BR FZF_IDLE_TIME "       Whole seconds since the last user activity"
+.br
+.BR FZF_IDLE_TIME_MS "    Milliseconds since the last user activity"
+.br
 .BR FZF_PORT "            Port number when \-\-listen option is used"
 .br
 .BR FZF_SOCK "            Unix socket path when \-\-listen option is used"
@@ -1513,6 +1530,13 @@ fzf exports the following environment variables to its child processes.
 .BR FZF_PREVIEW_COLUMNS " Number of columns in the preview window"
 .br
 .BR FZF_RAW "             Only in raw mode. 1 if the current item matches, 0 otherwise"
+
+.PP
+.B FZF_CURRENT_ITEM
+is omitted when the item contains a NUL byte, because exec(2) cannot pass it.
+It is also omitted when the item is larger than 64 KB, so that a huge item
+cannot overflow the environment size limit and break preview and other child
+commands.
 
 .SH EXTENDED SEARCH MODE
 
@@ -1834,6 +1858,20 @@ e.g.
      # * Note that you can't use 'change' event in this case because the second position may not be available
      fzf \-\-sync \-\-bind 'result:transform:[[ \-z {q} ]] && echo "pos(2)"'\fR
 .RE
+
+\fIresult\-final\fR
+.RS
+Same as \fIresult\fR, but suppressed while the input stream is still open. Use
+this when you want a one-shot action per query instead of one per intermediate
+snapshot during loading.
+
+e.g.
+     \fB# 'result' fires per intermediate snapshot (header keeps updating during load);
+     # 'result-final' fires once after the stream closes (footer shows the final count)
+     (seq 100; sleep 1; seq 100) | fzf \-\-query 1 \\
+       \-\-bind 'result:transform\-header(echo result: $FZF_MATCH_COUNT),result\-final:transform\-footer(echo final: $FZF_MATCH_COUNT)'\fR
+.RE
+
 \fIchange\fR
 .RS
 Triggered whenever the query string is changed
@@ -1939,6 +1977,30 @@ variables starting from 1. It optionally sets \fBFZF_CLICK_FOOTER_WORD\fR
 if clicked on a word.
 .RE
 
+\fIevery(N)\fR
+.RS
+Triggered every \fIN\fR seconds (\fIN\fR can be a fractional number, e.g.
+\fB0.5\fR). The minimum interval is \fB0.01\fR seconds; values are floored
+to that.
+
+Combine with the \fBFZF_IDLE_TIME\fR (whole seconds) and
+\fBFZF_IDLE_TIME_MS\fR (milliseconds) environment variables to build
+idle\-based behavior without a separate event.
+
+e.g.
+     \fB# Live process list, refreshed every 2 seconds.
+     # --track --id-nth 2 keeps the cursor on the same PID across reloads.
+     fzf \-\-header\-lines 1 \-\-track \-\-id\-nth 2 \\
+         \-\-bind 'start,every(2):reload\-sync:ps \-ef'
+
+     # Auto\-accept after 10 seconds of inactivity, with a countdown in the footer after 5s.
+     fzf \-\-bind 'every(1):bg\-transform:
+       if   [[ $FZF_IDLE_TIME \-lt 5  ]]; then echo change\-footer:
+       elif [[ $FZF_IDLE_TIME \-lt 10 ]]; then echo "change\-footer:auto\-accept in $((10 \- FZF_IDLE_TIME))s"
+       else echo accept
+       fi'\fR
+.RE
+
 .SS AVAILABLE ACTIONS:
 A key or an event can be bound to one or more of the following actions.
 
@@ -1953,7 +2015,7 @@ A key or an event can be bound to one or more of the following actions.
     \fBbackward\-kill\-subword\fR
     \fBbackward\-kill\-word\fR           \fIalt\-bs\fR
     \fBbackward\-subword\fR
-    \fBbackward\-word\fR                \fIalt\-b   shift\-left\fR
+    \fBbackward\-word\fR                \fIalt\-b   shift\-left  alt\-left\fR
     \fBbecome(...)\fR                  (replace fzf process with the specified command; see below for the details)
     \fBbeginning\-of\-line\fR            \fIctrl\-a  home\fR
     \fBbell\fR                         (ring the terminal bell)
@@ -2000,7 +2062,7 @@ A key or an event can be bound to one or more of the following actions.
     \fBfirst\fR                        (move to the first match; same as \fBpos(1)\fR)
     \fBforward\-char\fR                 \fIctrl\-f  right\fR
     \fBforward\-subword\fR
-    \fBforward\-word\fR                 \fIalt\-f   shift\-right\fR
+    \fBforward\-word\fR                 \fIalt\-f   shift\-right alt\-right\fR
     \fBignore\fR
     \fBjump\fR                         (EasyMotion-like 2-keystroke movement)
     \fBkill\-line\fR

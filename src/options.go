@@ -4,12 +4,12 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"math"
 	"os"
 	"regexp"
 	"strconv"
 	"strings"
 	"time"
-	"unicode"
 
 	"github.com/junegunn/fzf/src/algo"
 	"github.com/junegunn/fzf/src/tui"
@@ -159,7 +159,7 @@ Usage: fzf [options]
   PREVIEW WINDOW
     --preview=COMMAND        Command to preview highlighted line ({})
     --preview-window=OPT     Preview window layout (default: right:50%)
-                             [up|down|left|right][,SIZE[%]]
+                             [up|down|left|right|next][,SIZE[%]]
                              [,[no]wrap[-word]][,[no]cycle][,[no]follow][,[no]info]
                              [,[no]hidden][,border-STYLE]
                              [,+SCROLL[OFFSETS][/DENOM]][,~HEADER_LINES]
@@ -232,6 +232,7 @@ Usage: fzf [options]
     --bash                   Print script to set up Bash shell integration
     --zsh                    Print script to set up Zsh shell integration
     --fish                   Print script to set up Fish shell integration
+    --nushell                Print script to set up Nushell integration
 
   HELP
     --version                Display version information and exit
@@ -331,6 +332,7 @@ const (
 	posLeft
 	posRight
 	posCenter
+	posNext // adjacent to the input section, on the list side
 )
 
 type tmuxOptions struct {
@@ -390,7 +392,7 @@ func (o *previewOpts) Toggle() {
 	o.hidden = !o.hidden
 }
 
-func (o *previewOpts) Border() tui.BorderShape {
+func (o *previewOpts) Border(layout layoutType) tui.BorderShape {
 	shape := o.border
 	if shape == tui.BorderLine {
 		switch o.position {
@@ -402,6 +404,12 @@ func (o *previewOpts) Border() tui.BorderShape {
 			shape = tui.BorderRight
 		case posRight:
 			shape = tui.BorderLeft
+		case posNext:
+			if layout == layoutReverse {
+				shape = tui.BorderBottom
+			} else {
+				shape = tui.BorderTop
+			}
 		}
 	}
 	return shape
@@ -511,7 +519,7 @@ func parseLabelPosition(opts *labelOpts, arg string) error {
 }
 
 func (a previewOpts) aboveOrBelow() bool {
-	return a.size.size > 0 && (a.position == posUp || a.position == posDown)
+	return a.size.size > 0 && (a.position == posUp || a.position == posDown || a.position == posNext)
 }
 
 type previewOptsCompare int
@@ -578,6 +586,7 @@ type Options struct {
 	Bash              bool
 	Zsh               bool
 	Fish              bool
+	Nushell           bool
 	Man               bool
 	Fuzzy             bool
 	FuzzyAlgo         algo.Algo
@@ -725,6 +734,7 @@ func defaultOptions() *Options {
 		Bash:         false,
 		Zsh:          false,
 		Fish:         false,
+		Nushell:      false,
 		Man:          false,
 		Fuzzy:        true,
 		FuzzyAlgo:    algo.FuzzyMatchV2,
@@ -1053,6 +1063,8 @@ func parseKeyChords(str string, message string) (map[tui.Event]string, []tui.Eve
 			add(tui.Focus)
 		case "result":
 			add(tui.Result)
+		case "result-final":
+			add(tui.ResultFinal)
 		case "resize":
 			add(tui.Resize)
 		case "one":
@@ -1257,7 +1269,14 @@ func parseKeyChords(str string, message string) (map[tui.Event]string, []tui.Eve
 			add(tui.F12)
 		default:
 			runes := []rune(key)
-			if len(key) == 10 && strings.HasPrefix(lkey, "ctrl-alt-") && isAlphabet(lkey[9]) {
+			if strings.HasPrefix(lkey, "every(") && strings.HasSuffix(lkey, ")") {
+				evt, err := parseEveryEvent(key[6 : len(key)-1])
+				if err != nil {
+					return nil, list, err
+				}
+				chords[evt] = key
+				list = append(list, evt)
+			} else if len(key) == 10 && strings.HasPrefix(lkey, "ctrl-alt-") && isAlphabet(lkey[9]) {
 				r := rune(lkey[9])
 				evt := tui.CtrlAltKey(r)
 				if r == 'h' && !util.IsWindows() {
@@ -1297,6 +1316,21 @@ func parseKeyChords(str string, message string) (map[tui.Event]string, []tui.Eve
 		}
 	}
 	return chords, list, nil
+}
+
+func parseEveryEvent(arg string) (tui.Event, error) {
+	secs, err := strconv.ParseFloat(strings.TrimSpace(arg), 64)
+	if err != nil || math.IsNaN(secs) || math.IsInf(secs, 0) || secs <= 0 {
+		return tui.Event{}, errors.New("every() requires a positive number of seconds")
+	}
+	if secs < 0.01 {
+		secs = 0.01
+	}
+	ms := math.Round(secs * 1000)
+	if ms > math.MaxInt32 {
+		return tui.Event{}, errors.New("every() interval is too large")
+	}
+	return tui.Event{Type: tui.Every, Char: rune(int32(ms))}, nil
 }
 
 func parseScheme(str string) (string, []criterion, error) {
@@ -1701,10 +1735,10 @@ Loop:
 	return masked
 }
 
-func parseSingleActionList(str string) ([]*action, error) {
+func parseSingleActionList(str string, putAllowed bool) ([]*action, error) {
 	// We prepend a colon to satisfy argActionRegexp and remove it later
 	masked := maskActionContents(":" + str)[1:]
-	return parseActionList(masked, str, []*action{}, false)
+	return parseActionList(masked, str, []*action{}, putAllowed)
 }
 
 func parseActionList(masked string, original string, prevActions []*action, putAllowed bool) ([]*action, error) {
@@ -2010,8 +2044,7 @@ func parseKeymap(keymap map[tui.Event][]*action, str string) error {
 				}
 				key = firstKey(keys)
 			}
-			putAllowed := key.Type == tui.Rune && unicode.IsGraphic(key.Char)
-			keymap[key], err = parseActionList(pair[1], origPairStr[len(pair[0])+1:], keymap[key], putAllowed)
+			keymap[key], err = parseActionList(pair[1], origPairStr[len(pair[0])+1:], keymap[key], key.Printable())
 			if err != nil {
 				return err
 			}
@@ -2329,6 +2362,8 @@ func parsePreviewWindowImpl(opts *previewOpts, input string) error {
 			opts.position = posLeft
 		case "right":
 			opts.position = posRight
+		case "next":
+			opts.position = posNext
 		case "rounded", "border", "border-rounded":
 			opts.border = tui.BorderRounded
 		case "border-line":
@@ -2521,6 +2556,7 @@ func parseOptions(index *int, opts *Options, allArgs []string) error {
 		opts.Bash = false
 		opts.Zsh = false
 		opts.Fish = false
+		opts.Nushell = false
 		opts.Help = false
 		opts.Version = false
 		opts.Man = false
@@ -2633,6 +2669,9 @@ func parseOptions(index *int, opts *Options, allArgs []string) error {
 		case "--fish":
 			clearExitingOpts()
 			opts.Fish = true
+		case "--nushell":
+			clearExitingOpts()
+			opts.Nushell = true
 		case "-h", "--help":
 			clearExitingOpts()
 			opts.Help = true
@@ -3135,7 +3174,7 @@ func parseOptions(index *int, opts *Options, allArgs []string) error {
 		case "--no-preview":
 			opts.Preview.command = ""
 		case "--preview-window":
-			str, err := nextString("preview window layout required: [up|down|left|right][,SIZE[%]][,border-STYLE][,wrap][,cycle][,hidden][,+SCROLL[OFFSETS][/DENOM]][,~HEADER_LINES][,default]")
+			str, err := nextString("preview window layout required: [up|down|left|right|next][,SIZE[%]][,border-STYLE][,wrap][,cycle][,hidden][,+SCROLL[OFFSETS][/DENOM]][,~HEADER_LINES][,default]")
 			if err != nil {
 				return err
 			}
