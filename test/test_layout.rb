@@ -248,7 +248,7 @@ class TestLayout < TestInteractive
     tmux.send_keys %(seq 5 | #{FZF} --layout=reverse --preview 'echo PREVIEW' --preview-window=next:3 --prompt='line2$ > '), :Enter
     expected = <<~OUTPUT
       line2$ >
-        5/5 ───
+        5/5
       ╭────────
       │ PREVIEW
       │
@@ -268,7 +268,7 @@ class TestLayout < TestInteractive
       │
       │
       ╰────────
-        5/5 ───
+        5/5
       >
     OUTPUT
     tmux.until { assert_block(expected, it) }
@@ -597,7 +597,7 @@ class TestLayout < TestInteractive
       │   │ 2
       │   │ 1
       │   └header──
-      │     19/97 ─
+      │     19/97
       │   > 1
       │
       ╰────────────
@@ -628,7 +628,7 @@ class TestLayout < TestInteractive
       ╭────────────
       │   hello
       ╰────────────
-          100/100 ─
+          100/100
         >
     BLOCK
     tmux.until { assert_block(block2, it) }
@@ -648,7 +648,7 @@ class TestLayout < TestInteractive
       │   2
       │   1
       ╰──────────
-          98/98 ─
+          98/98
         >
     BLOCK
     tmux.until { assert_block(block1, it) }
@@ -663,7 +663,7 @@ class TestLayout < TestInteractive
       │   1
       │   hello
       ╰──────────
-          98/98 ─
+          98/98
         >
     BLOCK
     tmux.until { assert_block(block2, it) }
@@ -679,7 +679,7 @@ class TestLayout < TestInteractive
       │   4
       │ > 3
       ╰──────────
-          98/98 ─
+          98/98
         >
       ╭──────────
       │   2
@@ -718,7 +718,7 @@ class TestLayout < TestInteractive
       ║   2
       ║   1
       ╚══════════
-          98/98 ─
+          98/98
         >
     BLOCK
     tmux.until { assert_block(block1, it) }
@@ -734,7 +734,7 @@ class TestLayout < TestInteractive
       ╭──────────
       │   hello
       ╰──────────
-          98/98 ─
+          98/98
         >
     BLOCK
     tmux.until { assert_block(block2, it) }
@@ -750,7 +750,7 @@ class TestLayout < TestInteractive
       │   4
       │ > 3
       ╰──────────
-          98/98 ─
+          98/98
         >
       ╔══════════
       ║   2
@@ -767,7 +767,7 @@ class TestLayout < TestInteractive
       ║   2
       ║   1
       ╚══════════
-          98/98 ─
+          98/98
         >
       ╭──────────
       │   hello
@@ -810,7 +810,7 @@ class TestLayout < TestInteractive
       │   │   2
       │   │   1
       │   └header────
-      │       19/97 ─
+      │       19/97
       │     > 1
       │
       ╰──────────────
@@ -825,7 +825,7 @@ class TestLayout < TestInteractive
       │   ║   11
       │   ║ > 10
       │   ╚list══════
-      │       19/97 ─
+      │       19/97
       │     > 1
       │   ┌──────────
       │   │   3
@@ -878,6 +878,28 @@ class TestLayout < TestInteractive
       │   └header────
       │
       ╰──────────────
+    BLOCK
+    tmux.until { assert_block(block, it) }
+  end
+
+  def test_adaptive_height_with_inline_sections
+    tmux.send_keys %(seq 10 | #{FZF} --height=~100% --list-border --header-lines=1 --header-lines-border=inline), :Enter
+    block = <<~BLOCK
+      ╭──────
+      │   10
+      │   9
+      │   8
+      │   7
+      │   6
+      │   5
+      │   4
+      │   3
+      │ > 2
+      ├──────
+      │   1
+      ╰──────
+          9/9
+        >
     BLOCK
     tmux.until { assert_block(block, it) }
   end
@@ -1039,9 +1061,9 @@ class TestLayout < TestInteractive
       └──────── │   103   │   101   │   103   │   101   │ │ 102   │ ┌────── │ │ 102   │ ┌────── │   2/2 ─ │ ┌─────── │ ┌───── │   103    │ ┌─────── │ ┌───────
                 │   5/5 ─ │   102   │   2/2 ─ │   102   │ │ 103   │ │ 101   │ │ 103   │ │ 101   │ >       │ │   2/2  │ │ 101  │ ┌─────── │ │   101  │ │ >
                 │ >       │   103   │ >       │   103   │ └────── │ │ 102   │ └────── │ │ 102   │ ┌────── │ │ >      │ │ 102  │ │   5/5  │ │   102  │ └───────
-                └──────── └──────── └──────── └──────── │   5/5 ─ │ │ 103   │   2/2 ─ │ │ 103   │ │ 101   │ └─────── │ │ 103  │ │ >      │ │   103  │ ┌───────
+                └──────── └──────── └──────── └──────── │   5/5   │ │ 103   │   2/2   │ │ 103   │ │ 101   │ └─────── │ │ 103  │ │ >      │ │   103  │ ┌───────
                                                         │ >       │ └────── │ >       │ └────── │ │ 102   │ ┌─────── │ └───── │ └─────── │ └─────── │ │   101
-                                                        └──────── └──────── └──────── │   2/2 ─ │ │ 103   │ │ 101    └─────── └───────── │ ┌─────── │ │   102
+                                                        └──────── └──────── └──────── │   2/2   │ │ 103   │ │ 101    └─────── └───────── │ ┌─────── │ │   102
                                                                                       │ >       │ └────── │ │ 102                        │ │ >      │ │   103
                                                                                       └──────── └──────── │ │ 103                        │ └─────── │ └───────
                                                                                                           │ └───────                     └───────── └─────────
@@ -1099,9 +1121,9 @@ class TestLayout < TestInteractive
       │ >       │   102   │ >       │   102   │ >       │ │ 101   │ >       │ │ 101   │ │ 101   │ │ 101   │ └────── │ └─────── │ └────── │   101   │ │ > 1
       └──────── │   3/3 ─ │   101   │   1/1 ─ │   101   │ │ 102   │ ┌────── │ │ 102   │ │ 102   │ │ 102   │ ┌────── │ ┌─────── │ ┌────── │   102   │ └───────
                 │ >       │   102   │ >       │   102   │ └─HEAD─ │ │ 101   │ └─HEAD─ │ └─HEAD─ │ └─HEAD─ │ │ 101   │ │   1/1  │ │ 101   │ ─────── │ ┌───────
-                └──────── └──────── └──────── └──────── │   3/3 ─ │ │ 102   │   1/1 ─ │   1/1 ─ │   1/1 ─ │ │ 102   │ │ >      │ │ 102   │   3/3   │ │ >
+                └──────── └──────── └──────── └──────── │   3/3   │ │ 102   │   1/1   │   1/1   │   1/1   │ │ 102   │ │ >      │ │ 102   │   3/3   │ │ >
                                                         │ >       │ └─HEAD─ │ >       │ >       │ >       │ └─HEAD─ │ └─────── │ └─HEAD─ │ >       │ └───────
-                                                        └──────── └──────── └──────── └──────── └──────── │   1/1 ─ │ ┌─────── └──────── └──────── │ ┌───────
+                                                        └──────── └──────── └──────── └──────── └──────── │   1/1   │ ┌─────── └──────── └──────── │ ┌───────
                                                                                                           │ >       │ │ 101                        │ │   101
                                                                                                           └──────── │ │ 102                        │ │   102
                                                                                                                     │ └─HEAD──                     │ └─HEAD──
@@ -1159,9 +1181,9 @@ class TestLayout < TestInteractive
       │ >       │   102   │ >       │   102   │ >       │ │ 101   │ >       │ │ 101   │ > 3     │ > 3      │ > 3     │   101   │ │   3
       └──────── │   3/3 ─ │   101   │   1/1 ─ │   101   │ │ 102   │ ┌────── │ │ 102   │ ┌────── │ ┌─────── │ ┌────── │   102   │ └───────
                 │ >       │   102   │ >       │   102   │ └─HEAD─ │ │ 101   │ └─HEAD─ │ │ 101   │ │   1/1  │ │ 101   │ ─────── │ ┌───────
-                └──────── └──────── └──────── └──────── │   3/3 ─ │ │ 102   │   1/1 ─ │ │ 102   │ │ >      │ │ 102   │   3/3   │ │ >
+                └──────── └──────── └──────── └──────── │   3/3   │ │ 102   │   1/1   │ │ 102   │ │ >      │ │ 102   │   3/3   │ │ >
                                                         │ >       │ └─HEAD─ │ >       │ └─HEAD─ │ └─────── │ └─HEAD─ │ >       │ └───────
-                                                        └──────── └──────── └──────── │   1/1 ─ │ ┌─────── └──────── └──────── │ ┌───────
+                                                        └──────── └──────── └──────── │   1/1   │ ┌─────── └──────── └──────── │ ┌───────
                                                                                       │ >       │ │ 101                        │ │   101
                                                                                       └──────── │ │ 102                        │ │   102
                                                                                                 │ └─HEAD──                     │ └─HEAD──
@@ -1191,7 +1213,7 @@ class TestLayout < TestInteractive
       │ ┌─label──
       │ │ header
       │ └────────
-      │   10/10 ─
+      │   10/10
       │ >
       └──────────
     BLOCK
@@ -1228,13 +1250,282 @@ class TestLayout < TestInteractive
     end
   end
 
+  def test_separator_with_input_border
+    # Border line below input does not face the list; separator is shown
+    tmux.send_keys %(seq 100 | #{FZF} --input-border bottom), :Enter
+    block = <<~BLOCK
+      > 1
+        100/100 ──
+      >
+      ────────────
+    BLOCK
+    tmux.until { assert_block(block, it) }
+    teardown
+    setup
+
+    # List border faces the input instead; separator is hidden
+    tmux.send_keys %(seq 100 | #{FZF} --input-border bottom --list-border rounded), :Enter
+    block = <<~BLOCK
+      │ > 1
+      ╰────────────
+          100/100
+        >
+      ─────────────
+    BLOCK
+    tmux.until { assert_block(block, it) }
+    teardown
+    setup
+
+    # Border line above input faces the list; separator is hidden
+    tmux.send_keys %(seq 100 | #{FZF} --input-border top), :Enter
+    block = <<~BLOCK
+      > 1
+      ────────────
+        100/100
+      >
+    BLOCK
+    tmux.until { assert_block(block, it) }
+  end
+
+  def test_separator_with_input_border_reverse
+    # Border line above input does not face the list; separator is shown
+    tmux.send_keys %(seq 100 | #{FZF} --layout reverse --input-border top), :Enter
+    block = <<~BLOCK
+      ────────────
+      >
+        100/100 ──
+      > 1
+    BLOCK
+    tmux.until { assert_block(block, it) }
+    teardown
+    setup
+
+    # Border line below input faces the list; separator is hidden
+    tmux.send_keys %(seq 100 | #{FZF} --layout reverse --input-border bottom), :Enter
+    block = <<~BLOCK
+      >
+        100/100
+      ────────────
+      > 1
+    BLOCK
+    tmux.until { assert_block(block, it) }
+  end
+
+  def test_separator_with_preview_next
+    # Preview window at 'next' position sits next to the input section, so the
+    # header border does not hide the separator
+    tmux.send_keys %(seq 100 | #{FZF} --header foo --header-border rounded --no-list-border --preview 'echo hi' --preview-window next,1,border-none), :Enter
+    block = <<~BLOCK
+      ╰────────────
+      hi
+        100/100 ───
+      >
+    BLOCK
+    tmux.until { assert_block(block, it) }
+    teardown
+    setup
+
+    # Same when 'next' position comes from a threshold alternative
+    tmux.send_keys %(seq 100 | #{FZF} --header foo --header-border rounded --no-list-border --preview 'echo hi' --preview-window 'up,40%,<9999(next,1,border-none)'), :Enter
+    tmux.until { assert_block(block, it) }
+    teardown
+    setup
+
+    # A border of the preview window at 'next' position facing the input
+    # section hides the separator
+    tmux.send_keys %(seq 100 | #{FZF} --preview : --preview-window next,3), :Enter
+    block = <<~BLOCK
+      ╰────────────
+        100/100
+      >
+    BLOCK
+    tmux.until { assert_block(block, it) }
+    teardown
+    setup
+
+    # Same when every spec in the threshold chain is a bordered preview
+    # window at 'next' position
+    tmux.send_keys %(seq 100 | #{FZF} --preview : --preview-window 'next,3,<15(next,3)'), :Enter
+    tmux.until { assert_block(block, it) }
+  end
+
+  def test_separator_with_preview_next_toggle
+    tmux.send_keys %(seq 100 | #{FZF} --preview 'echo hi' --preview-window next,3,hidden --bind space:toggle-preview), :Enter
+    hidden = <<~BLOCK
+      > 1
+        100/100 ──
+      >
+    BLOCK
+    tmux.until { assert_block(hidden, it) }
+
+    tmux.send_keys :Space
+    shown = <<~BLOCK
+      │ hi
+      │
+      │
+      ╰────────────
+        100/100
+      >
+    BLOCK
+    tmux.until { assert_block(shown, it) }
+
+    tmux.send_keys :Space
+    tmux.until { assert_block(hidden, it) }
+  end
+
+  def test_separator_with_preview_next_alternative_only
+    # 'next' appears only in a threshold alternative and there is no
+    # previewer, so the input section stays embedded in the list window and
+    # needs the separator
+    tmux.send_keys %(seq 100 | #{FZF} --preview-window '<9999(next)' --list-border rounded), :Enter
+    block = <<~BLOCK
+      │ > 1
+      │   100/100 ──
+      │ >
+      ╰─────────────
+    BLOCK
+    tmux.until { assert_block(block, it) }
+  end
+
+  def test_separator_with_preview_action_at_next
+    # preview(...) action can display an ad-hoc preview window at 'next'
+    # position at any time; the list border must not hide the separator
+    tmux.send_keys %(seq 100 | #{FZF} --list-border rounded --preview-window 'next,border-left,5' --bind 'space:preview(echo hi)'), :Enter
+    block = <<~BLOCK
+      ╰─────────────
+          100/100 ──
+        >
+    BLOCK
+    tmux.until { assert_block(block, it) }
+
+    tmux.send_keys :Space
+    block = <<~BLOCK
+      │ hi
+      │
+      │
+      │
+      │
+          100/100 ──
+        >
+    BLOCK
+    tmux.until { assert_block(block, it) }
+  end
+
+  def test_separator_change_preview_window_keeps_forced_preview
+    # Relayout triggered by the separator visibility change must not drop a
+    # preview window opened via the preview(...) action
+    tmux.send_keys %(seq 100 | #{FZF} --info hidden --input-border left --list-border --preview-window 'up,50%,<5(next)' --bind 'space:preview(echo AD-HOC)' --bind 'x:change-preview-window(up,50%,<5(up))'), :Enter
+    tmux.until { |lines| assert_includes lines.join, '│ ─' }
+
+    tmux.send_keys :Space
+    tmux.until do |lines|
+      assert_includes lines.join, 'AD-HOC'
+      assert_includes lines.join, '│ ─'
+    end
+
+    # Only the inactive threshold alternative changes; separator is hidden
+    # by the list border, and the forced preview window must survive
+    tmux.send_keys :x
+    tmux.until do |lines|
+      assert_includes lines.join, 'AD-HOC'
+      refute_includes lines.join, '│ ─'
+    end
+  end
+
+  def test_separator_with_change_preview_window_chain
+    # change-preview-window that only alters a non-active spec must still
+    # trigger a relayout when it changes the separator visibility
+    tmux.send_keys %(seq 100 | #{FZF} --info hidden --layout reverse --preview 'echo hi' --preview-window 'next,3,border-none,<100(next,3,border-top)' --bind 'space:change-preview-window(next,3,border-top,<100(next,3,border-top))'), :Enter
+    block = <<~BLOCK
+      >
+      ──────────
+      ──────────
+      hi
+    BLOCK
+    tmux.until { assert_block(block, it) }
+
+    tmux.send_keys :Space
+    block = <<~BLOCK
+      >
+      ──────────
+      hi
+    BLOCK
+    tmux.until { assert_block(block, it) }
+    teardown
+    setup
+
+    # Also when only the drawn bar changes; the info line row count is
+    # constant with the default info style
+    tmux.send_keys %(seq 100 | #{FZF} --layout reverse --preview 'echo hi' --preview-window 'next,3,border-none,<100(next,3,border-top)' --bind 'space:change-preview-window(next,3,border-top,<100(next,3,border-top))'), :Enter
+    block = <<~BLOCK
+      >
+        100/100 ──
+    BLOCK
+    tmux.until { assert_block(block, it) }
+
+    tmux.send_keys :Space
+    block = <<~BLOCK
+      >
+        100/100
+      ────────────
+    BLOCK
+    tmux.until { assert_block(block, it) }
+    teardown
+    setup
+
+    # Also when compare finds a content-layout difference (scroll offset)
+    tmux.send_keys %(seq 100 | #{FZF} --info hidden --preview 'echo hi' --preview-window 'next,3,<2(up,3)' --bind 'space:change-preview-window(next,3,+1,<2(next,3))'), :Enter
+    block = <<~BLOCK
+      ╰────────────
+      ─────────────
+      >
+    BLOCK
+    tmux.until { assert_block(block, it) }
+
+    tmux.send_keys :Space
+    block = <<~BLOCK
+      ╰────────────
+      >
+    BLOCK
+    tmux.until { assert_block(block, it) }
+  end
+
+  def test_separator_with_inline_header_border
+    # Inline header is drawn inside the list border; bare header lines sit
+    # next to the input section, so the separator is shown
+    tmux.send_keys %(seq 100 | #{FZF} --list-border rounded --header foo --header-lines 2 --header-border inline --header-lines-border none), :Enter
+    block = <<~BLOCK
+      ╰────────────
+          2
+          1
+          98/98 ───
+        >
+    BLOCK
+    tmux.until { assert_block(block, it) }
+    teardown
+    setup
+
+    # Header lines are embedded in the list border along with the inline
+    # header; the list border faces the input section and hides the separator
+    tmux.send_keys %(seq 100 | #{FZF} --list-border rounded --header foo --header-lines 2 --header-border inline), :Enter
+    block = <<~BLOCK
+      │   2
+      │   1
+      │   foo
+      ╰────────────
+          98/98
+        >
+    BLOCK
+    tmux.until { assert_block(block, it) }
+  end
+
   def test_header_border_no_pointer_and_marker
     tmux.send_keys %(seq 10 | #{FZF} --header-lines 1 --header-border sharp --no-list-border --pointer '' --marker ''), :Enter
     block = <<~BLOCK
       ┌──────
       │ 1
       └──────
-        9/9 ─
+        9/9
       >
     BLOCK
     tmux.until { assert_block(block, it) }

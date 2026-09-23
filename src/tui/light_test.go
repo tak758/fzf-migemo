@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 	"unicode"
 )
@@ -349,4 +350,131 @@ func TestLightRenderer(t *testing.T) {
 	assertEscSequence("\x1b[13~", "f3")
 	assertEscSequence("\x1b[14~", "f4")
 
+}
+
+func TestLightRendererScrollWheel(t *testing.T) {
+	tty_file, _ := os.Open("")
+	renderer, _ := NewLightRenderer(
+		"", tty_file, &ColorTheme{}, true, true, 0, false, true,
+		func(h int) int { return h })
+
+	light_renderer := renderer.(*LightRenderer)
+
+	assertScroll := func(sequence string, scroll int, mods string) {
+		bytes := []byte(sequence)
+		light_renderer.buffer = bytes
+
+		sz := 1
+		event := light_renderer.escSequence(&sz)
+		me := event.MouseEvent
+		if event.Type != Mouse || me == nil {
+			t.Errorf("sequence: %q | got %s, want a Mouse event", sequence, event.Type.String())
+			return
+		}
+		got := ""
+		if me.Ctrl {
+			got += "ctrl-"
+		}
+		if me.Alt {
+			got += "alt-"
+		}
+		if me.Shift {
+			got += "shift-"
+		}
+		got = strings.TrimSuffix(got, "-")
+		if me.S != scroll || got != mods || me.Down {
+			t.Errorf(
+				"sequence: %q | scroll=%d mods=%q down=%v != scroll=%d mods=%q down=false",
+				sequence, me.S, got, me.Down, scroll, mods)
+		}
+	}
+
+	assertScroll("\x1b[<64;1;1M", 1, "")  // up
+	assertScroll("\x1b[<65;1;1M", -1, "") // down
+	assertScroll("\x1b[<66;1;1M", 0, "")  // left  (ignored)
+	assertScroll("\x1b[<67;1;1M", 0, "")  // right (ignored)
+
+	assertScroll("\x1b[<68;1;1M", 1, "shift")  // shift + up
+	assertScroll("\x1b[<69;1;1M", -1, "shift") // shift + down
+	assertScroll("\x1b[<70;1;1M", 0, "shift")  // shift + left  (ignored)
+	assertScroll("\x1b[<71;1;1M", 0, "shift")  // shift + right (ignored)
+
+	assertScroll("\x1b[<72;1;1M", 1, "alt")  // alt + up
+	assertScroll("\x1b[<73;1;1M", -1, "alt") // alt + down
+	assertScroll("\x1b[<74;1;1M", 0, "alt")  // alt + left  (ignored)
+	assertScroll("\x1b[<75;1;1M", 0, "alt")  // alt + right (ignored)
+
+	assertScroll("\x1b[<80;1;1M", 1, "ctrl")  // ctrl + up
+	assertScroll("\x1b[<81;1;1M", -1, "ctrl") // ctrl + down
+	assertScroll("\x1b[<82;1;1M", 0, "ctrl")  // ctrl + left  (ignored)
+	assertScroll("\x1b[<83;1;1M", 0, "ctrl")  // ctrl + right (ignored)
+
+	assertScroll("\x1b[<84;1;1M", 1, "ctrl-shift")  // ctrl+shift + up
+	assertScroll("\x1b[<85;1;1M", -1, "ctrl-shift") // ctrl+shift + down
+	assertScroll("\x1b[<86;1;1M", 0, "ctrl-shift")  // ctrl+shift + left  (ignored)
+	assertScroll("\x1b[<87;1;1M", 0, "ctrl-shift")  // ctrl+shift + right (ignored)
+
+	assertScroll("\x1b[<92;1;1M", 1, "ctrl-alt-shift")  // ctrl+alt+shift + up
+	assertScroll("\x1b[<93;1;1M", -1, "ctrl-alt-shift") // ctrl+alt+shift + down
+	assertScroll("\x1b[<94;1;1M", 0, "ctrl-alt-shift")  // ctrl+alt+shift + left  (ignored)
+	assertScroll("\x1b[<95;1;1M", 0, "ctrl-alt-shift")  // ctrl+alt+shift + right (ignored)
+}
+
+// Assert the exact byte stream emitted for a scripted rendering sequence,
+// locking down the SGR deduplication behavior of the light renderer.
+func TestLightRendererSGRDeduplication(t *testing.T) {
+	renderer, _ := NewLightRenderer(
+		"", nil, &ColorTheme{}, true, false, 8, false, true,
+		func(h int) int { return h })
+	r := renderer.(*LightRenderer)
+	r.width = 80
+	r.height = 24
+
+	out, err := os.CreateTemp(t.TempDir(), "fzf-ttyout")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer out.Close()
+	r.ttyout = out
+
+	w := r.NewWindow(0, 0, 40, 4, WindowList, MakeBorderStyle(BorderNone, true), false).(*LightWindow)
+	w.fg = colDefault
+	w.bg = colDefault
+	r.queued.Reset()
+
+	red := NewColorPair(196, colDefault, AttrRegular)
+	blue := NewColorPair(21, colDefault, AttrRegular)
+
+	w.Move(0, 0)
+	w.CPrint(red, "ab")
+	w.CPrint(red, "cd") // same pair; no SGR expected
+	w.CPrint(blue, "ef")
+	w.Print("gh") // default colors; one reset expected
+	w.Print("ij") // still default; no SGR expected
+	w.Move(1, 2)
+	w.CPrint(red, "kl")
+	r.invalidateSGR()
+	w.CPrint(red, "mn") // re-emitted after invalidation
+	r.flush()           // adds a trailing reset to leave the default state
+
+	expected := "\x1b[?2026h\x1b[?7l\x1b[?25l" +
+		"\r" +
+		"\x1b[;38;5;196mab" +
+		"cd" +
+		"\x1b[;38;5;21mef" +
+		"\x1b[0mgh" +
+		"ij" +
+		"\x1b[1B\x1b[3G" +
+		"\x1b[;38;5;196mkl" +
+		"\x1b[;38;5;196mmn" +
+		"\x1b[0m" +
+		"\x1b[?25h\x1b[?7h\x1b[?2026l"
+
+	bytes, err := os.ReadFile(out.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(bytes) != expected {
+		t.Errorf("expected: %q\n     got: %q", expected, string(bytes))
+	}
 }

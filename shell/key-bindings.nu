@@ -47,6 +47,20 @@ def __fzfcmd []: nothing -> list<string> {
   ['fzf']
 }
 
+# Keybinding modes to activate. The Helix modes only exist since Nushell
+# 0.115.0, so they are only included when running a version that supports
+# them (major > 0 covers a hypothetical 1.0+ where the minor resets).
+def __fzf_modes []: nothing -> list<string> {
+  let v = version
+  let major = ($v.major | into int)
+  let minor = ($v.minor | into int)
+  if ($major > 0) or ($minor >= 115) {
+    ['emacs', 'vi_normal', 'vi_insert', 'helix_normal', 'helix_select', 'helix_insert']
+  } else {
+    ['emacs', 'vi_normal', 'vi_insert']
+  }
+}
+
 
 export-env {
   $env.FZF_CTRL_T_OPTS     = $env.FZF_CTRL_T_OPTS?     | default ""
@@ -55,11 +69,11 @@ export-env {
 }
 
 # Directories
-const alt_c = {
+let alt_c = {
     name: fzf_dirs
     modifier: alt
     keycode: char_c
-    mode: [emacs, vi_normal, vi_insert]
+    mode: (__fzf_modes)
     event: [
       {
         send: executehostcommand
@@ -82,11 +96,11 @@ const alt_c = {
 }
 
 # History
-const ctrl_r = {
+let ctrl_r = {
   name: fzf_history
   modifier: control
   keycode: char_r
-  mode: [emacs, vi_insert, vi_normal]
+  mode: (__fzf_modes)
   event: [
     {
       send: executehostcommand
@@ -115,16 +129,16 @@ const ctrl_r = {
 }
 
 # Files
-const ctrl_t =  {
+let ctrl_t =  {
     name: fzf_files
     modifier: control
     keycode: char_t
-    mode: [emacs, vi_normal, vi_insert]
+    mode: (__fzf_modes)
     event: [
       {
         send: executehostcommand
         cmd: "
-          let fzf_opts = (__fzf_defaults '--reverse --walker=file,dir,follow,hidden --scheme=path' $'($env.FZF_CTRL_T_OPTS) -m');
+          let fzf_opts = (__fzf_defaults '--reverse --walker=file,dir,follow,hidden --scheme=path' $'($env.FZF_CTRL_T_OPTS) -m --print0');
           let fzfcmd = (__fzfcmd);
           let fzf_args = ($fzfcmd | skip 1);
           let ctrl_t_cmd = ($env.FZF_CTRL_T_COMMAND? | default null);
@@ -135,9 +149,19 @@ const ctrl_t =  {
             let sh_cmd = [$ctrl_t_cmd '|' $fzf_cmd_str] | str join ' ';
             with-env { FZF_DEFAULT_OPTS: $fzf_opts, FZF_DEFAULT_OPTS_FILE: '' } { ^sh -c $sh_cmd }
           };
-          let result = ($result | str replace --all (char newline) ' ' | str trim);
-          commandline edit --append $result;
-          commandline set-cursor --end
+          # Serialize each path as a Nushell string literal, so that syntax
+          # in a file name is not evaluated when the line is executed.
+          let result = (
+            $result
+            | split row (char nul)
+            | where {|path| $path != ''}
+            | each {|path| $path | to nuon}
+            | str join ' '
+          );
+          if ($result | is-not-empty) {
+            commandline edit --append $'($result) ';
+            commandline set-cursor --end
+          }
         "
       }
     ]

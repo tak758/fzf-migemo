@@ -24,14 +24,43 @@ const (
 	defaultEscDelay = 100
 	escPollInterval = 5
 	offsetPollTries = 10
+	queryTimeout    = 500 * time.Millisecond
 	maxInputBuffer  = 1024 * 1024
-	maxSelectTries  = 100
+	escapeLookback  = 256
 )
 
 const DefaultTtyDevice string = "/dev/tty"
 
-var offsetRegexp = regexp.MustCompile("(.*?)\x00?\x1b\\[([0-9]+);([0-9]+)R")
+var offsetRegexp = regexp.MustCompile("\x00?\x1b\\[([0-9]+);([0-9]+)R")
 var offsetRegexpBegin = regexp.MustCompile("^\x1b\\[[0-9]+;[0-9]+R")
+
+// DECRPM reply to the DECRQM query for bracketed paste mode. Ps is 1 or 3 when
+// the mode was already set, 2 or 4 when reset, 0 when the terminal does not
+// recognize the mode.
+var pasteModeRegexp = regexp.MustCompile("\x00?\x1b\\[\\?2004;([0-4])\\$y")
+var pasteModeRegexpBegin = regexp.MustCompile("^\x1b\\[\\?2004;[0-4]\\$y")
+
+// A report to ask the terminal for, and the reply to recognize it by.
+type termQuery struct {
+	seq   string
+	reply *regexp.Regexp
+}
+
+var offsetQuery = termQuery{"6n", offsetRegexp}
+var pasteModeQuery = termQuery{"?2004$p", pasteModeRegexp}
+
+// What we ask the terminal at startup, in the order the queries go out.
+// A terminal answers them in that order, so the cursor position query is last
+// and also ends the wait: every terminal fzf supports answers it, so once its
+// reply arrives, a query still unanswered is one the terminal does not know
+// rather than one we stopped waiting for too early.
+//
+// Terminals that don't support the paste mode query (DECRQM) might leave
+// 'p' on the screen. To handle such cases, we query the position before and
+// after it, compare them, and clean the artifact if they don't match.
+//
+// Reference: https://ansicode.eversources.app/en/sequence/decrqm
+var startupQueries = []termQuery{offsetQuery, pasteModeQuery, offsetQuery}
 
 func (r *LightRenderer) Bell() {
 	r.flushRaw("\a")
@@ -39,6 +68,7 @@ func (r *LightRenderer) Bell() {
 
 func (r *LightRenderer) PassThrough(str string) {
 	r.queued.WriteString("\x1b7" + str + "\x1b8")
+	r.invalidateSGR()
 }
 
 func (r *LightRenderer) stderr(str string) {
@@ -90,14 +120,36 @@ func (r *LightRenderer) csi(code string) string {
 	return fullcode
 }
 
+// setSGR emits the given SGR sequence only when the terminal is not already
+// in that state. Sequences built by csiColor start with a reset parameter,
+// so each of them fully determines the state on its own. The zero value of
+// r.sgr never matches a sequence, so the first update after Init, Resume, or
+// invalidateSGR is always emitted.
+func (r *LightRenderer) setSGR(code string) {
+	if code != r.sgr {
+		r.stderr(code)
+		r.sgr = code
+	}
+}
+
+// invalidateSGR marks the terminal SGR state as unknown, e.g. after raw
+// output that may have changed it behind the renderer's back.
+func (r *LightRenderer) invalidateSGR() {
+	r.sgr = ""
+}
+
 func (r *LightRenderer) flush() {
 	if r.queued.Len() > 0 {
-		raw := "\x1b[?7l\x1b[?25l" + r.queued.String()
+		// Leave the terminal in the default SGR state between frames
+		r.setSGR("\x1b[0m")
+		// Wrap the frame in synchronized update mode (2026) so that the
+		// terminal applies it atomically. Terminals without support ignore
+		// the unknown private mode and behave as before.
+		raw := "\x1b[?2026h\x1b[?7l\x1b[?25l" + r.queued.String()
 		if r.showCursor {
-			raw += "\x1b[?25h\x1b[?7h"
-		} else {
-			raw += "\x1b[?7h"
+			raw += "\x1b[?25h"
 		}
+		raw += "\x1b[?7h\x1b[?2026l"
 		r.flushRaw(raw)
 		r.queued.Reset()
 	}
@@ -123,16 +175,22 @@ type LightRenderer struct {
 	width         int
 	height        int
 	yoffset       int
+	xoffset       int
 	tabstop       int
 	escDelay      int
 	fullscreen    bool
 	upOneLine     bool
 	queued        strings.Builder
+	sgr           string
 	y             int
 	x             int
 	maxHeightFunc func(int) int
 	showCursor    bool
 	mutex         sync.Mutex
+
+	// Whether bracketed paste was already on before we enabled it. Nil when
+	// the terminal did not answer the query.
+	pasteWasSet *bool
 
 	// Windows only
 	ttyinChannel    chan byte
@@ -206,8 +264,13 @@ func (r *LightRenderer) Init() error {
 
 	if r.fullscreen {
 		r.smcup()
-	} else {
-		y, x := r.findOffset()
+	}
+
+	// Ask everything in one round trip, before the offset is needed.
+	y, x, pasteWasSet := r.queryStartup()
+	r.pasteWasSet = pasteWasSet
+
+	if !r.fullscreen {
 		r.mouse = r.mouse && y >= 0
 		// When --no-clear is used for repetitive relaunching, there is a small
 		// time frame between fzf processes where the user keystrokes are not
@@ -215,6 +278,7 @@ func (r *LightRenderer) Init() error {
 		// increased and we're left with unwanted extra new line.
 		if x > 0 && r.clearOnExit {
 			r.upOneLine = true
+			r.xoffset = x
 			r.makeSpace()
 		}
 		// We assume that --no-clear is used for repetitive relaunching of fzf.
@@ -232,7 +296,7 @@ func (r *LightRenderer) Init() error {
 	r.csi("G")
 	r.csi("K")
 	if !r.clearOnExit && !r.fullscreen {
-		r.csi("s")
+		r.stderr("\x1b7") // DECSC: save cursor position
 	}
 	if !r.fullscreen && r.mouse {
 		r.yoffset, _ = r.findOffset()
@@ -250,15 +314,15 @@ func (r *LightRenderer) makeSpace() {
 }
 
 func (r *LightRenderer) move(y int, x int) {
-	// w.csi("u")
 	if r.y < y {
 		r.csi(fmt.Sprintf("%dB", y-r.y))
 	} else if r.y > y {
 		r.csi(fmt.Sprintf("%dA", r.y-y))
 	}
-	r.stderr("\r")
-	if x > 0 {
-		r.csi(fmt.Sprintf("%dC", x))
+	if x == 0 {
+		r.stderr("\r")
+	} else {
+		r.csi(fmt.Sprintf("%dG", x+1))
 	}
 	r.y = y
 	r.x = x
@@ -274,6 +338,45 @@ func getEnv(name string, defaultValue int) int {
 		return defaultValue
 	}
 	return atoi(env, defaultValue)
+}
+
+// Bytes of a CSI sequence: parameter and intermediate bytes continue it, a
+// final byte ends it. Order is not enforced. Strictness would only make fzf
+// give up on a sequence it could have framed.
+//
+// https://vt100.net/emu/dec_ansi_parser
+func csiContinues(b byte) bool { return b >= 0x20 && b <= 0x3f }
+func csiFinal(b byte) bool     { return b >= 0x40 && b <= 0x7e }
+
+// incompleteEscape reports whether the buffer ends in an escape sequence that
+// has not been terminated yet. The read loop keeps waiting in that case, so the
+// parser is never handed a fragment to guess at.
+func incompleteEscape(buffer []byte) bool {
+	// Only the tail can hold a sequence still arriving. This runs once per byte
+	// read, so scanning all of a large paste would make the read quadratic.
+	tail := buffer
+	if len(tail) > escapeLookback {
+		tail = tail[len(tail)-escapeLookback:]
+	}
+	start := bytes.LastIndexByte(tail, Esc.Byte())
+	if start < 0 || len(tail)-start < 2 {
+		return false
+	}
+	switch tail[start+1] {
+	case '[':
+		for _, b := range tail[start+2:] {
+			if csiFinal(b) {
+				return false
+			}
+			if !csiContinues(b) {
+				return false // malformed, do not wait for a terminator
+			}
+		}
+		return true
+	case 'O':
+		return len(tail)-start < 3
+	}
+	return false
 }
 
 func (r *LightRenderer) getBytes(cancellable bool) ([]byte, getCharResult, error) {
@@ -294,7 +397,11 @@ func (r *LightRenderer) getBytesInternal(cancellable bool, buffer []byte, nonblo
 	if c == Esc.Int() || nonblock {
 		retries = r.escDelay / escPollInterval
 	}
-	buffer = append(buffer, byte(c))
+	// A non-blocking read that found nothing has no byte to record. Recording
+	// one would put a NUL in the middle of a reply still being assembled.
+	if result.ok() {
+		buffer = append(buffer, byte(c))
+	}
 
 	pc := c
 	for {
@@ -312,6 +419,13 @@ func (r *LightRenderer) getBytesInternal(cancellable bool, buffer []byte, nonblo
 			retries = 0
 		}
 		buffer = append(buffer, byte(c))
+		// Keep waiting while a sequence is still arriving. Dropping the budget
+		// after every byte left fzf parsing whatever the read happened to end on.
+		// Past the introducer this is not the ESC key, so the wait costs no
+		// Escape latency and ESCDELAY=0 must not reduce it to nothing.
+		if retries == 0 && incompleteEscape(buffer) {
+			retries = max(r.escDelay, defaultEscDelay) / escPollInterval
+		}
 		pc = c
 
 		// This should never happen under normal conditions,
@@ -417,6 +531,12 @@ func (r *LightRenderer) escSequence(sz *int) Event {
 	}
 
 	loc := offsetRegexpBegin.FindIndex(r.buffer)
+	if loc != nil && loc[0] == 0 {
+		*sz = loc[1]
+		return Event{Invalid, 0, nil}
+	}
+
+	loc = pasteModeRegexpBegin.FindIndex(r.buffer)
 	if loc != nil && loc[0] == 0 {
 		*sz = loc[1]
 		return Event{Invalid, 0, nil}
@@ -905,12 +1025,15 @@ func (r *LightRenderer) mouseSequence(sz *int) Event {
 	down := rest[end] == 'M'
 
 	scroll := 0
-	if t >= 64 {
+	wheel := t >= 64
+	if wheel {
 		t -= 64
-		if t&0b1 == 1 {
-			scroll = -1
-		} else {
+		// SGR wheel button codes: 64=up, 65=down, 66=left, 67=right
+		switch t & 0b11 {
+		case 0:
 			scroll = 1
+		case 1:
+			scroll = -1
 		}
 	}
 
@@ -921,7 +1044,7 @@ func (r *LightRenderer) mouseSequence(sz *int) Event {
 	shift := t&0b00100 > 0
 	drag := t&0b100000 > 0 // 32
 
-	if scroll != 0 {
+	if wheel {
 		return Event{Mouse, 0, &MouseEvent{y, x, scroll, false, false, false, ctrl, alt, shift}}
 	}
 
@@ -992,11 +1115,23 @@ func (r *LightRenderer) disableMouse() {
 
 func (r *LightRenderer) disableModes() {
 	r.disableMouse()
-	r.csi("?2004l")
+	// Put bracketed paste back the way we found it. A shell that runs fzf from
+	// a line editor widget re-enables the mode only when the editor starts, so
+	// forcing it off here would leave it off for the rest of the session.
+	// Terminals that did not answer the query fall back to disabling, which is
+	// what fzf has always done.
+	if r.pasteWasSet != nil && *r.pasteWasSet {
+		r.csi("?2004h")
+	} else {
+		r.csi("?2004l")
+	}
 }
 
 func (r *LightRenderer) Resume(clear bool, sigcont bool) {
 	r.setupTerminal()
+	// The programs that ran in the meantime may have left the terminal in an
+	// arbitrary SGR state
+	r.invalidateSGR()
 	if clear {
 		if r.fullscreen {
 			r.smcup()
@@ -1018,7 +1153,6 @@ func (r *LightRenderer) Clear() {
 	if r.fullscreen {
 		r.csi("H")
 	}
-	// r.csi("u")
 	r.origin()
 	r.csi("J")
 	r.flush()
@@ -1041,19 +1175,21 @@ func (r *LightRenderer) Refresh() {
 }
 
 func (r *LightRenderer) Close() {
-	// r.csi("u")
 	if r.clearOnExit {
 		if r.fullscreen {
 			r.rmcup()
 		} else {
 			r.origin()
+			// Erase our own area first, then step back onto the line the
+			// prompt was on, so nothing on that line is touched
+			r.csi("J")
 			if r.upOneLine {
 				r.csi("A")
+				r.csi(fmt.Sprintf("%dG", r.xoffset+1))
 			}
-			r.csi("J")
 		}
 	} else if !r.fullscreen {
-		r.csi("u")
+		r.stderr("\x1b8") // DECRC: restore cursor position
 	}
 	if !r.showCursor {
 		r.csi("?25h")
@@ -1270,10 +1406,6 @@ func (w *LightWindow) drawBorder(onlyHorizontal bool) {
 	}
 }
 
-func (w *LightWindow) csi(code string) string {
-	return w.renderer.csi(code)
-}
-
 func (w *LightWindow) stderrInternal(str string, allowNLCR bool, resetCode string) {
 	w.renderer.stderrInternal(str, allowNLCR, resetCode)
 }
@@ -1412,13 +1544,18 @@ func ulColorCode(c Color) string {
 	return ""
 }
 
+// csiColor builds the SGR sequence for the given colors and attributes
+// without emitting it. The sequence starts with a reset parameter, so it
+// fully determines the SGR state on its own.
 func (w *LightWindow) csiColor(fg Color, bg Color, ul Color, attr Attr) (bool, string) {
 	codes := append(attrCodes(attr), colorCodes(fg, bg)...)
 	if ulCode := ulColorCode(ul); ulCode != "" {
 		codes = append(codes, ulCode)
 	}
-	code := w.csi(";" + strings.Join(codes, ";") + "m")
-	return len(codes) > 0, code
+	if len(codes) == 0 {
+		return false, "\x1b[0m"
+	}
+	return true, "\x1b[;" + strings.Join(codes, ";") + "m"
 }
 
 func (w *LightWindow) Print(text string) {
@@ -1431,15 +1568,13 @@ func cleanse(str string) string {
 
 func (w *LightWindow) CPrint(pair ColorPair, text string) {
 	_, code := w.csiColor(pair.Fg(), pair.Bg(), pair.Ul(), pair.Attr())
+	w.renderer.setSGR(code)
 	w.stderrInternal(cleanse(text), false, code)
-	w.csi("0m")
 }
 
 func (w *LightWindow) cprint2(fg Color, bg Color, attr Attr, text string) {
-	hasColors, code := w.csiColor(fg, bg, colDefault, attr)
-	if hasColors {
-		defer w.csi("0m")
-	}
+	_, code := w.csiColor(fg, bg, colDefault, attr)
+	w.renderer.setSGR(code)
 	w.stderrInternal(cleanse(text), false, code)
 }
 
@@ -1460,7 +1595,7 @@ func (w *LightWindow) fill(str string, resetCode string) FillReturn {
 				}
 				w.MoveAndClear(w.posy, w.posx)
 				w.Move(w.posy+1, 0)
-				w.renderer.stderr(resetCode)
+				w.renderer.setSGR(resetCode)
 				if len(lines) > 1 {
 					sign := w.wrapSign
 					width := w.wrapSignWidth
@@ -1470,7 +1605,8 @@ func (w *LightWindow) fill(str string, resetCode string) FillReturn {
 						width = truncatedWidth
 					}
 					w.stderrInternal(DIM+sign, false, resetCode)
-					w.renderer.stderr(resetCode)
+					w.renderer.invalidateSGR()
+					w.renderer.setSGR(resetCode)
 					w.Move(w.posy, width)
 				}
 			}
@@ -1481,20 +1617,19 @@ func (w *LightWindow) fill(str string, resetCode string) FillReturn {
 			return FillSuspend
 		}
 		w.Move(w.posy+1, 0)
-		w.renderer.stderr(resetCode)
+		w.renderer.setSGR(resetCode)
 		return FillNextLine
 	}
 	return FillContinue
 }
 
 func (w *LightWindow) setBg() string {
-	if w.bg != colDefault {
-		_, code := w.csiColor(colDefault, w.bg, colDefault, AttrRegular)
-		return code
-	}
-	// Should clear dim attribute after ␍ in the preview window
+	// The plain reset code for the default background is still required to
+	// clear the dim attribute after ␍ in the preview window
 	// e.g. printf "foo\rbar" | fzf --ansi --preview 'printf "foo\rbar"'
-	return "\x1b[m"
+	_, code := w.csiColor(colDefault, w.bg, colDefault, AttrRegular)
+	w.renderer.setSGR(code)
+	return code
 }
 
 func (w *LightWindow) LinkBegin(uri string, params string) {
@@ -1520,7 +1655,7 @@ func (w *LightWindow) CFill(fg Color, bg Color, ul Color, attr Attr, text string
 		bg = w.bg
 	}
 	if hasColors, resetCode := w.csiColor(fg, bg, ul, attr); hasColors {
-		defer w.csi("0m")
+		w.renderer.setSGR(resetCode)
 		return w.fill(text, resetCode)
 	}
 	return w.fill(text, w.setBg())

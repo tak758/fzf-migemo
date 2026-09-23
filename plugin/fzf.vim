@@ -24,7 +24,8 @@
 if exists('g:loaded_fzf')
   finish
 endif
-let g:loaded_fzf = 1
+" Bumped when the plugin gains behavior a caller may need to detect
+let g:loaded_fzf = 20260821
 
 let s:is_win = has('win32') || has('win64')
 if s:is_win && &shellslash
@@ -127,7 +128,7 @@ function! s:fzf_tempname()
   return s:fzf_call('tempname')
 endfunction
 
-let s:layout_keys = ['window', 'tmux', 'up', 'down', 'left', 'right']
+let s:layout_keys = ['window', 'popup', 'tmux', 'up', 'down', 'left', 'right']
 let s:fzf_go = s:base_dir.'/bin/fzf'
 let s:fzf_tmux = s:base_dir.'/bin/fzf-tmux'
 
@@ -139,6 +140,15 @@ function! s:popup_support()
 endfunction
 
 function! s:default_layout()
+  " A floating pane leaves the window fzf was started from visible and
+  " reachable while fzf is open. A popup covers it, inside Vim or not.
+  " Without a job, s:execute_tmux() blocks and freezes Vim. fzf also wants a
+  " tmux window of at least 3x3, and Vim's pane is never larger than the
+  " window, so asking Vim is free and survives a resize
+  if (has('nvim') || has('job')) && &columns >= 3 && &lines >= 3
+        \ && s:tmux_enabled() && get(s:, 'tmux_floating', 0)
+    return { 'tmux': '90%,60%' }
+  endif
   return s:popup_support()
         \ ? { 'window' : { 'width': 0.9, 'height': 0.6 } }
         \ : { 'down': '~40%' }
@@ -164,6 +174,12 @@ function! fzf#install()
   if v:shell_error
     throw 'Failed to download fzf: '.script
   endif
+
+  " A new binary invalidates the chosen executable and everything derived from
+  " its version, including whether fzf opens a floating pane. fzf#install() is
+  " also the vim-plug 'do' hook, so this can run long after the first fzf call
+  let [s:versions, s:checked] = [{}, {}]
+  unlet! s:exec s:tmux s:tmux_floating
 endfunction
 
 let s:versions = {}
@@ -255,8 +271,24 @@ function! fzf#exec(...)
   return s:exec
 endfunction
 
+" Path to the fzf-tmux script, or an empty string if it is not available. Only
+" the legacy options still need it. --popup is handled by fzf itself.
+function! s:fzf_tmux_script()
+  if !executable(s:fzf_tmux)
+    if !executable('fzf-tmux')
+      return ''
+    endif
+    let s:fzf_tmux = 'fzf-tmux'
+  endif
+  return s:fzf_tmux
+endfunction
+
 function! s:tmux_enabled()
-  if has('gui_running') || !exists('$TMUX')
+  if has('gui_running')
+    return 0
+  endif
+
+  if empty($TMUX) && empty($ZELLIJ)
     return 0
   endif
 
@@ -264,17 +296,42 @@ function! s:tmux_enabled()
     return s:tmux
   endif
 
-  let s:tmux = 0
-  if !executable(s:fzf_tmux)
-    if executable('fzf-tmux')
-      let s:fzf_tmux = 'fzf-tmux'
-    else
-      return 0
-    endif
+  let [s:tmux, s:tmux_floating] = [0, 0]
+
+  " --popup covers Zellij as well, where the fzf-tmux script and the tmux
+  " version are irrelevant. fzf learned it in 0.71.0, and the floating pane
+  " options it passes need Zellij 0.44 or above. fzf checks tmux first, so
+  " this branch is Zellij without tmux. Both non-empty means tmux wins.
+  " empty(), not exists(), to match how fzf reads the two variables
+  if empty($TMUX)
+    let s:tmux =
+          \ s:compare_versions(s:get_version(s:fzf_binary()), '0.71.0') >= 0
+          \ && s:compare_versions(s:zellij_version(), '0.44') >= 0
+    let s:tmux_floating = s:tmux
+    return s:tmux
   endif
 
   let output = system('tmux -V')
-  let s:tmux = !v:shell_error && output >= 'tmux 1.7'
+  if v:shell_error
+    return s:tmux
+  endif
+  " e.g. 'tmux 3.7b', 'tmux next-3.8'
+  let ver = matchstr(output, '\d\+\.\d\+')
+
+  " --popup requires tmux 3.3 or above, and needs no fzf-tmux script. The
+  " default layout wants a floating pane, which also needs fzf 0.74.0 or
+  " above. fzf opens a modal popup otherwise. The version here only skips the
+  " probe for servers too old to answer it
+  if s:compare_versions(ver, '3.3') >= 0
+    let s:tmux = 1
+    let s:tmux_floating = s:compare_versions(ver, '3.7') >= 0
+          \ && s:tmux_floating_pane_support()
+          \ && s:compare_versions(s:get_version(s:fzf_binary()), '0.74.0') >= 0
+    return s:tmux
+  endif
+
+  " Older versions still go through the script
+  let s:tmux = !empty(s:fzf_tmux_script()) && s:compare_versions(ver, '1.7') >= 0
   return s:tmux
 endfunction
 
@@ -422,7 +479,10 @@ function! fzf#wrap(...)
     if !exists('g:fzf_layout') && exists('g:fzf_height')
       let opts.down = g:fzf_height
     else
-      let opts = extend(opts, s:validate_layout(get(g:, 'fzf_layout', s:default_layout())))
+      " Not get(), which would evaluate s:default_layout() and run its version
+      " checks even when g:fzf_layout makes the answer irrelevant
+      let opts = extend(opts, s:validate_layout(
+            \ exists('g:fzf_layout') ? g:fzf_layout : s:default_layout()))
     endif
   endif
 
@@ -502,6 +562,11 @@ try
   let [shell, shellslash, shellcmdflag, shellxquote] = s:use_sh()
 
   let dict   = exists('a:1') ? copy(a:1) : {}
+  " 'popup' and 'tmux' are synonyms, as --popup and --tmux are. Normalize here
+  " so that the rest of the function only has to know about one of them.
+  if has_key(dict, 'popup')
+    let dict.tmux = remove(dict, 'popup')
+  endif
   let temps  = { 'result': s:fzf_tempname() }
   let optstr = s:evaluate_opts(get(dict, 'options', ''))
   try
@@ -539,16 +604,19 @@ try
         \ executable('tput') && filereadable('/dev/tty')
   let has_vim8_term = has('terminal') && has('patch-8.0.995')
   let has_nvim_term = has('nvim-0.2.1') || has('nvim') && !s:is_win
-  let use_term = has_nvim_term || has_vim8_term
-    \ && !s:need_cmd_window
-    \ && (has('gui_running') || s:is_win || s:present(dict, 'down', 'up', 'left', 'right', 'window'))
+  let use_term = (has_nvim_term || has_vim8_term) && !s:need_cmd_window
   let use_tmux = (has_key(dict, 'tmux') || (!use_height && !use_term || prefer_tmux) && !has('win32unix') && s:splittable(dict)) && s:tmux_enabled()
   if prefer_tmux && use_tmux
     let use_height = 0
     let use_term = 0
   endif
   if use_term
-    let optstr .= ' --no-height --no-tmux'
+    let optstr .= ' --no-height'
+    " Cancel a --popup from $FZF_DEFAULT_OPTS only when the spec asks for a Vim
+    " window. Without a layout option, respect the user's preference.
+    if s:present(dict, 'window', 'up', 'down', 'left', 'right')
+      let optstr .= ' --no-tmux'
+    endif
   elseif use_height
     let height = s:calc_size(&lines, dict.down, dict)
     let optstr .= ' --no-tmux --height='.height
@@ -568,8 +636,12 @@ try
     return s:execute_term(dict, command, temps)
   endif
 
-  let lines = use_tmux ? s:execute_tmux(dict, command, temps)
-                 \ : s:execute(dict, command, use_height, temps)
+  " s:execute_tmux may run fzf asynchronously, so it calls s:callback itself
+  if use_tmux
+    return s:execute_tmux(dict, command, temps)
+  endif
+
+  let lines = s:execute(dict, command, use_height, temps)
   call s:callback(dict, lines)
   return lines
 finally
@@ -586,6 +658,44 @@ function! s:present(dict, ...)
   return 0
 endfunction
 
+" The binary fzf#exec() would choose, without its prompting or installing.
+" Layout selection runs before fzf#exec() has resolved one
+function! s:fzf_binary()
+  if exists('s:exec')
+    return s:exec
+  endif
+  let bins = filter(['fzf', s:fzf_go], 'executable(v:val)')
+  if empty(bins)
+    return ''
+  endif
+  return len(bins) > 1 ? sort(bins, 's:compare_binary_versions')[-1] : bins[0]
+endfunction
+
+function! s:zellij_version()
+  if !exists('s:zellij_ver')
+    let output = systemlist('zellij --version')
+    let s:zellij_ver = v:shell_error || empty(output)
+          \ ? '' : matchstr(output[0], '[0-9.]\+')
+  endif
+  return s:zellij_ver
+endfunction
+
+" Whether the running server can put fzf in a floating pane. fzf decides on
+" the server, not on the version the tmux client reports, so ask it the same
+" question rather than predicting the answer. See tmuxFloatingPaneInfo in
+" src/tmux.go, which also requires the tmux window to be at least 3x3; that
+" one changes with a resize, so s:default_layout() reads it from Vim instead
+" of caching it here
+function! s:tmux_floating_pane_support()
+  " fzf does not use a floating pane when it was not started from a pane
+  if empty($TMUX_PANE)
+    return 0
+  endif
+  let out = system('tmux list-commands new-pane')
+  " A server that does not know the command exits normally with no output
+  return !v:shell_error && out =~# 'new-pane'
+endfunction
+
 function! s:fzf_tmux(dict)
   let size = get(a:dict, 'tmux', '')
   if empty(size)
@@ -597,10 +707,15 @@ function! s:fzf_tmux(dict)
     endfor
   endif
 
-  " Legacy fzf-tmux options
-  if size =~ '-'
+  " Legacy fzf-tmux options are flags. A --tmux value never starts with a dash,
+  " but may contain one, as in '90%,60%,border-native'
+  if size =~ '^-'
+    let script = s:fzf_tmux_script()
+    if empty(script)
+      throw 'fzf-tmux not found, required for the legacy option: ' . size
+    endif
     return printf('LINES=%d COLUMNS=%d %s %s %s --',
-          \ &lines, &columns, fzf#shellescape(s:fzf_tmux), size, (has_key(a:dict, 'source') ? '' : '-'))
+          \ &lines, &columns, fzf#shellescape(script), size, (has_key(a:dict, 'source') ? '' : '-'))
   end
 
   " Using native --tmux option
@@ -742,6 +857,42 @@ function! s:execute(dict, command, use_height, temps) abort
   return s:exit_handler(a:dict, exit_status, command) < 2 ? lines : []
 endfunction
 
+" Returns 0 if the job could not be started
+function! s:start_popup_job(dict, command, temps) abort
+  let fzf = { 'dict': a:dict, 'temps': a:temps, 'command': a:command }
+  " Vim passes (job, status) and Nvim (id, status, event)
+  function! fzf.on_exit(id, code, ...) abort
+    redraw!
+    let lines = s:collect(self.temps)
+    if s:exit_handler(self.dict, a:code, self.command, 1) >= 2
+      return
+    endif
+    call s:pushd(self.dict)
+    call s:callback(self.dict, lines)
+  endfunction
+
+  if has('nvim')
+    return jobstart([&shell, &shellcmdflag, a:command], fzf) > 0
+  endif
+
+  " The command redirects to the result file, so no stream is of interest
+  let opts = { 'exit_cb': function(fzf.on_exit),
+        \ 'in_io': 'null', 'out_io': 'null', 'err_io': 'null' }
+
+  " job_start() gives the child $TERM=dumb, and the popup inherits the
+  " environment from here, so fzf would lose its colors. 'env' was added in
+  " 8.0.902, so set it in the command itself on older versions.
+  let command = a:command
+  if has('patch-8.0.902')
+    let opts.env = { 'TERM': $TERM }
+  elseif !s:is_win
+    let command = join(['export TERM=' . fzf#shellescape($TERM) . ';', command])
+  endif
+
+  let job = job_start([&shell, &shellcmdflag, command], opts)
+  return job_status(job) !=# 'fail'
+endfunction
+
 function! s:execute_tmux(dict, command, temps) abort
   let command = a:command
   let cwd = s:pushd(a:dict)
@@ -750,11 +901,24 @@ function! s:execute_tmux(dict, command, temps) abort
     let command = join(['cd', fzf#shellescape(cwd), '&&', command])
   endif
 
+  " fzf draws in a pane of its own, so the process we start here only waits for
+  " it. Hold it with a job instead of system() so that Vim keeps processing its
+  " event loop, and nothing has to be displayed for it. Fall back to the
+  " blocking path when the job cannot be started, or the sink would never run
+  " and the temporary files would be left behind.
+  if (has('nvim') || has('job')) && s:start_popup_job(a:dict, command, a:temps)
+    " Restore the working directory while fzf runs. on_exit pushes it again
+    call s:dopopd()
+    return []
+  endif
+
   call system(command)
   let exit_status = v:shell_error
   redraw!
   let lines = s:collect(a:temps)
-  return s:exit_handler(a:dict, exit_status, command) < 2 ? lines : []
+  let lines = s:exit_handler(a:dict, exit_status, command) < 2 ? lines : []
+  call s:callback(a:dict, lines)
+  return lines
 endfunction
 
 function! s:calc_size(max, val, dict)
